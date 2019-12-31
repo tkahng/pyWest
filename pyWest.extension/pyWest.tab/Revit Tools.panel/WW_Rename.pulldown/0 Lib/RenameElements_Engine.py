@@ -49,9 +49,6 @@ import RenameElements_GUI as REGUI
 
 class CollectElements:
     def __init__(self):
-        self.searchString = None
-        self.targetString = None        
-        
         # CollectViews output
         self.allViewObjs = None
         
@@ -60,32 +57,22 @@ class CollectElements:
         
         # CollectRooms output
         self.allRoomObjs = None
-    #
-    # COLLECT & FILTER ELEMENTS
-    def CollectViews(self, searchString, targetString):
-        self.searchString = searchString
-        self.targetString = targetString        
-        
+    
+    def CollectViews(self):
         self.allViewObjs = [i for i in FilteredElementCollector(self.doc).OfClass(View)
                             if self.searchString in i.Name]
-        names = [i.Name for i in self.allViewObjs]
-        print(names)
+        names = [i.Name for i in self.allViewObjs] # not really needed
         return(self.allViewObjs)
 
-    def CollectSheets(self, searchString, targetString):
-        self.searchString = searchString
-        self.targetString = targetString
-        
+    def CollectSheets(self):
         self.allSheetObjs = [i for i in FilteredElementCollector(self.doc).OfClass(ViewSheet)
                              if self.searchString in i.Name]
         return(self.allSheetObjs)
     
-    def CollectRooms(self, searchString, targetString):
-        self.searchString = searchString
-        self.targetString = targetString
-        
-        self.allRoomObjs = [i for i in FilteredElementCollector(self.doc).OfClass()
-                            if self.searchString in someting]
+    def CollectRooms(self):
+        # FilteredElementCollector(self.doc).OfClass(SpatialElement)
+        self.allRoomObjs = [i for i in FilteredElementCollector(self.doc).OfCategory(BuiltInCategory.OST_Rooms) 
+                            if "container" not in i.Level.Name.lower()]     
         return(self.allRoomObjs)
 
 class RenameElements:
@@ -120,7 +107,11 @@ class RenameElements:
         t.Commit()           
 
 class DerivedClass(CollectElements, RenameElements):
-    def __init__(self):
+    def __init__(self, searchString=None, targetString=None):
+        # default input parameters, to be updated by GUI selection
+        self.searchString = searchString
+        self.targetString = targetString
+        
         # revit doc parameters
         self.doc = __revit__.ActiveUIDocument.Document
         self.app = __revit__.Application
@@ -136,10 +127,14 @@ class DerivedClass(CollectElements, RenameElements):
         formObj = REGUI.RE_Form()
         formObj.Run_Form()
         
+        # convert default none values to string outputs based on form selection
+        self.searchString = formObj.searchString
+        self.targetString = formObj.targetString
+        
         if formObj.viewsBoolean:
-            self.CollectViews(formObj.searchString, formObj.targetString)
+            self.CollectViews()
             self.RenameViews()
         
         if formObj.sheetsBoolean:
-            self.CollectSheets(formObj.searchString, formObj.targetString)
+            self.CollectSheets()
             self.RenameSheets()
