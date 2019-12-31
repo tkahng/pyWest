@@ -65,8 +65,7 @@ class CollectElements:
         return(self.allViewObjs)
 
     def CollectSheets(self):
-        self.allSheetObjs = [i for i in FilteredElementCollector(self.doc).OfClass(ViewSheet)
-                             if self.searchString in i.Name]
+        self.allSheetObjs = [i for i in FilteredElementCollector(self.doc).OfClass(ViewSheet)]
         return(self.allSheetObjs)
     
     def CollectRooms(self):
@@ -82,27 +81,28 @@ class RenameElements:
     def RenameViews(self):
         t = Transaction(self.doc, "Renaming views")
         t.Start()
-        for i in self.allViewObjs:
+        for obj in self.allViewObjs:
             try:
-                i.Name = i.Name.replace(self.searchString, self.targetString)
+                obj.Name = obj.Name.replace(self.searchString, self.targetString)
             except: pass
         t.Commit()
     
     def RenameSheets(self):
         t = Transaction(self.doc, "Renaming sheets")
         t.Start()
-        for i in self.allSheetObjs:
+        for obj in self.allSheetObjs:
             try:
-                i.Name = i.Name.replace(self.searchString, self.targetString)
+                newNumber = obj.get_Parameter(BuiltInParameter.SHEET_NUMBER).Set(obj.SheetNumber.Replace(self.searchString, self.targetString))
+                print(newNumber)
             except: pass
         t.Commit()
     
     def RenameRooms(self):
         t = Transaction(self.doc, "Renaming rooms")
         t.Start()
-        for i in self.allRoomObjs:
+        for obj in self.allRoomObjs:
             try:
-                i.Name = i.Name.replace(self.searchString, self.targetString)
+                obj.Name = obj.Name.replace(self.searchString, self.targetString)
             except: pass
         t.Commit()           
 
