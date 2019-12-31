@@ -14,14 +14,6 @@ import math
 import rhino3dm as rh
 import compute_rhino3d as rc
 
-def ShiftFilePath(path, branchesBack=1, append=None):
-    pathReverse = path[::-1]
-    newPathBackwards = pathReverse.split('\\', branchesBack)[-1]
-    newPath = newPathBackwards[::-1]
-
-    if type(append) is str: return(r"{0}\{1}".format(newPath, append))
-
-sys.path.append(ShiftFilePath(os.path.abspath(__file__), 3, r"0 Lib"))
 import WW_RhinoRevitConversion as RRC # only run this in Python 3.7xx environment
 import WW_ExternalPython as EP
 import WW_DataExchange as DE

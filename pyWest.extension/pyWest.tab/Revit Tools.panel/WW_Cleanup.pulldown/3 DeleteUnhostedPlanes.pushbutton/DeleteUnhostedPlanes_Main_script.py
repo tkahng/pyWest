@@ -9,15 +9,9 @@ MODIFIED BY THEIR METHODS
 import traceback
 import os
 import sys
-sys.path.append(r'C:\Program Files (x86)\IronPython 2.7\Lib')
 
-def ShiftFilePath(path, branchesBack=1, append=None):
-	pathReverse = path[::-1]
-	newPathBackwards = pathReverse.split('\\', branchesBack)[-1]
-	newPath = newPathBackwards[::-1]
-
-	if type(append) is str: return(r"{0}\{1}".format(newPath, append))
 try:
+	sys.path.append(r'C:\Program Files (x86)\IronPython 2.7\Lib')
 	import math
 	
 	# imports for Windows Form
@@ -36,10 +30,8 @@ try:
 	clr.AddReference('RevitAPIUI')
 	from Autodesk.Revit.DB import *
 	
-	sys.path.append(ShiftFilePath(os.path.abspath(__file__), 2, r"0 Lib"))
 	import CleanupModel_Engine
 
-	
 	def Main():
 		# set the active Revit application and document
 		doc = __revit__.ActiveUIDocument.Document

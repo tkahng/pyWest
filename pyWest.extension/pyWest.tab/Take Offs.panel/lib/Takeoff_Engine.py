@@ -27,18 +27,10 @@ rpwLib = r"G:\Shared drives\Prod - BIM\05_Regional\USCI WEST\pyWest_HeavyFiles\D
 sys.path.append(rpwLib)
 import rpw
 
-def ShiftFilePath(path, branchesBack=1, append=None):
-    pathReverse = path[::-1]
-    newPathBackwards = pathReverse.split('\\', branchesBack)[-1]
-    newPath = newPathBackwards[::-1]
-
-    if type(append) is str: return(r"{0}\{1}".format(newPath, append))
-
 # import partial Rhinocommon API - C# library - same api as Rhino3dm on Python 3.7xx
 clr.AddReference(r"Rhino3dmIO.dll")
 import Rhino as rh
 
-sys.path.append(ShiftFilePath(os.path.abspath(__file__), 3, r"0 Lib"))
 import WW_RhinoRevitConversion as RRC # only run this in Python 3.7xx environment
 import WW_ExternalPython as EP
 import WW_DataExchange as DE

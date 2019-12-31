@@ -12,13 +12,6 @@ Copyright (c) 2014-2016 Ehsan Iran-Nejad
 pyRevit: repository at https://github.com/eirannejad/pyRevit
 """
 
-def ShiftFilePath(path, branchesBack=1, append=None):
-    pathReverse = path[::-1]
-    newPathBackwards = pathReverse.split('\\', branchesBack)[-1]
-    newPath = newPathBackwards[::-1]
-
-    if type(append) is str: return(r"{0}\{1}".format(newPath, append))
-
 # pyRevit metadata variables
 __title__ = "Storefront 2.0"
 __author__ = "WeWork Design Technology West - Alvaro Luna"
@@ -40,7 +33,6 @@ import traceback # noqa E402
 #log(__file__)
 
 # SF2 modules
-sys.path.append(ShiftFilePath(os.path.abspath(__file__), 2, r"0 Lib"))
 import SF2_Engine as SFE # noqa E402
 
 try:

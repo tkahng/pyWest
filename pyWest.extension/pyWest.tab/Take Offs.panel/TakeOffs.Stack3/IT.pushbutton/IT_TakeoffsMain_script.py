@@ -7,12 +7,6 @@ __version__ = "4.0"
 import traceback
 import os
 
-def ShiftFilePath(path, branchesBack=1, append=None):
-    pathReverse = path[::-1]
-    newPathBackwards = pathReverse.split('\\', branchesBack)[-1]
-    newPath = newPathBackwards[::-1]
-
-    if type(append) is str: return(r"{0}\{1}".format(newPath, append))
 try:
     import math
     import clr
@@ -23,7 +17,6 @@ try:
     from Autodesk.Revit.DB import *
     
     import sys
-    sys.path.append(ShiftFilePath(os.path.abspath(__file__), 3, r"0 Lib"))
     import Takeoff_Engine
 
     def Main():

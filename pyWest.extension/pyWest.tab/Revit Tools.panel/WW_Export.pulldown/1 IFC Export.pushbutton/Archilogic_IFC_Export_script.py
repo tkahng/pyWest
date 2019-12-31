@@ -6,12 +6,6 @@ import traceback
 import os
 import sys
 
-def ShiftFilePath(path, branchesBack=1, append=None):
-    pathReverse = path[::-1]
-    newPathBackwards = pathReverse.split('\\', branchesBack)[-1]
-    newPath = newPathBackwards[::-1]
-
-    if type(append) is str: return(r"{0}\{1}".format(newPath, append))
 try:
     sys.path.append(r'C:\Program Files (x86)\IronPython 2.7\Lib')
     import math
@@ -32,8 +26,6 @@ try:
     clr.AddReference('RevitAPIUI')
     from Autodesk.Revit.DB import *
 
-    dataExchangePath = ShiftFilePath(os.path.abspath(__file__), 2, r"0 Lib")
-    sys.path.append(dataExchangePath)
     import Archilogic_Engine
     import Archilogic_GUI
     

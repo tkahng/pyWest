@@ -44,7 +44,6 @@ from Autodesk.Revit.DB import * # noqa E402
 import Autodesk.Revit.UI.Selection # noqa E402
 
 # DT West modules
-sys.path.append(r"C:\Users\aluna\Documents\WeCode\GitRepos\pyWestRepo\pyWest2\pyWest.extension\pyWest2.tab\0 Lib")
 import WW_DataExchange as DE # noqa E402
 import WW_ExternalPython as EP # noqa E402
 import WW_RhinoRevitConversion as RRC # noqa E402
@@ -107,7 +106,8 @@ class PreGUICollection:
         self.loadedFamilies = []
         
         # level names to be filtered out
-        self.levelExclusionList = ["Container", "Roof", "Mezzaninne",
+        # mezzanine must be included
+        self.levelExclusionList = ["Container", "Roof",
                                    "CONTAINER LEVEL", "X LEVEL"]
     def CollectLevels(self):
         
@@ -115,11 +115,15 @@ class PreGUICollection:
         # enhance the list exclusion so its not so literal
         self.levelObjs = [i for i in FilteredElementCollector(self.doc).OfClass(Level) if i.Name not in self.levelExclusionList]
         self.levelNames = [i.Name for i in self.levelObjs]
-        self.levelInts = [list(map(float, re.findall(r'\d+', i)))[0] for i in self.levelNames] # <-HOW?
-        
-        # sort output variables
-        self.levelObjs = SFU.Sort_Alist_By_Blist(self.levelObjs, self.levelInts)[0]
-        self.levelNames, self.levelInts = SFU.Sort_Alist_By_Blist(self.levelNames, self.levelInts)
+        try:
+            self.levelInts = [list(map(float, re.findall(r'\d+', i)))[0] for i in self.levelNames] # <-HOW?
+            
+            # sort output variables
+            self.levelObjs = SFU.Sort_Alist_By_Blist(self.levelObjs, self.levelInts)[0]
+            self.levelNames, self.levelInts = SFU.Sort_Alist_By_Blist(self.levelNames, self.levelInts)            
+        except:
+            # this method does not capture instances of mezzaninne being used as a floor...address this 
+            pass
     def CollectGypWalls(self):
         self.gypWallObjs = [i for i in FilteredElementCollector(self.doc).OfClass(Wall) 
                             if i.Name not in self.familyObj.SFWallTypeNames.keys()
@@ -1501,7 +1505,6 @@ class SetFinalSFParameters:
             self.newWall.get_Parameter(BuiltInParameter.WALL_BASE_OFFSET).Set(newWallSillHeight)
             self.newWall.get_Parameter(BuiltInParameter.WALL_USER_HEIGHT_PARAM).Set(newWallHeadHeight)
             self.newWall.get_Parameter(BuiltInParameter.ALL_MODEL_INSTANCE_COMMENTS).Set(self.storefrontObject.SuperType)
-            #self.newWall.get_Parameter(BuiltInParameter.ALL_MODEL_MARK).Set(str(self.selectedLevelId) + "-"+ str(self.storefrontObject.AssemblyID))
             self.newWall.get_Parameter(BuiltInParameter.ALL_MODEL_MARK).Set("{0}-{1}".format(self.selectedLevelId, self.storefrontObject.AssemblyID))
 
 ################################################
@@ -1587,7 +1590,7 @@ class PostSFErrorCheck:
         print("...CHECKING ERRORS...")
         # WHERE IN THE F IS THIS???
         SFQC.SFCheckErrors().Run_SFCheckErrors()
-        print("...DONE!")
+        print("...DONE! YOU MAY CLOSE THIS WINDOW")
 
 #########################################
 ## DERIVED CLASS | GENERATE STOREFRONT ##
@@ -1671,10 +1674,7 @@ class GenerateSF(PreGUICollection, CreateNibWalls,
         
         # instantiate rpw form
         # select what system will be created and what families must be loaded
-        formObj = SFGUI.SF_Form(self.doc,
-                                levelNames=self.levelNames,
-                                gypWallNames=self.gypWallNames,
-                                loadedFamilies=self.loadedFamilies)
+        formObj = SFGUI.SF_Form(self.doc, loadedFamilies=self.loadedFamilies)
         formObj.SF_GetUserConfigs()
         
         # instatiate windows form

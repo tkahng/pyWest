@@ -10,12 +10,6 @@ sys.path.append(r'C:\Program Files (x86)\IronPython 2.7\Lib')
 import os
 import traceback
 
-def ShiftFilePath(path, branchesBack=1, append=None):
-    pathReverse = path[::-1]
-    newPathBackwards = pathReverse.split('\\', branchesBack)[-1]
-    newPath = newPathBackwards[::-1]
-
-    if type(append) is str: return(r"{0}\{1}".format(newPath, append))
 try:
     # imports for Windows Form
     import clr
@@ -34,7 +28,6 @@ try:
     clr.AddReference('RevitAPIUI')
     from Autodesk.Revit.DB import *
 
-    sys.path.append(ShiftFilePath(os.path.abspath(__file__), 2, r"0 Lib"))
     import WW_Worksets_Engine as WSE
     import WW_Worksets_PopUp as popUP
 
