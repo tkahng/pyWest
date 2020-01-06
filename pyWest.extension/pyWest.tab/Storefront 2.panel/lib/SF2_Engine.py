@@ -10,6 +10,24 @@ Copyright (c) 2016-2019 WeWork Design Technology West
 PyRevit Notice:
 Copyright (c) 2014-2016 Ehsan Iran-Nejad
 pyRevit: repository at https://github.com/eirannejad/pyRevit
+
+        
+        For fabrication, the families will have to have 
+        parameters that are constantly read and reported. 
+        An automation script will run and generate a list
+        of geometry with the assumption that what is created
+        will get built, but if it gets changed by the user, 
+        a second script will have to be run that signals an
+        update to the storefront system.
+
+        An idea for the future script might be to have a completly
+        new family that is more intelligent and complete. - actually
+        this is the only way this can be accomplished. The old system
+        doesn't matter because Elite will never build it the way it is
+        described above
+        
+        # ALSO REMEMBER THAT DOORS NEED TO BE CORRECTLY PLACED IN SF OTHERWISE THEY FAIL...
+        
 """
 
 # pyRevit metadata variables
@@ -46,6 +64,7 @@ import Autodesk.Revit.UI.Selection # noqa E402
 # DT West modules
 import WW_DataExchange as DE # noqa E402
 import WW_ExternalPython as EP # noqa E402
+import WW_Debug as DBG # noqa E402
 import WW_RhinoRevitConversion as RRC # noqa E402
 
 # SF2 modules
@@ -64,6 +83,9 @@ _VARIABLE = declaring private variables, functions, methods, or classes in a mod
             it will not be imported by "import module"
 __VARIABLE = variables that will get abbreviated with class name as a way of projecting
              variables whose names might get repeated as code is expanded with additional classes
+             
+ISSUES:
+    - if configuration fails it will stall script
 """
 class StorefrontElevation:
     def __init__(self, _hostElementIds, _line, _superType, _id, _sillHeight, _headHeight, _systemName):	
@@ -102,6 +124,11 @@ class PreGUICollection:
         
         self.gypWallObjs = []
         self.gypWallNames = []
+        self.gypWallUniqueNames = []
+        
+        # these two depend on one another bc objs cannot be serialized
+        self.gypWallDict = {}
+        self.gypWallDict_KEYS = {}
         
         self.loadedFamilies = []
         
@@ -110,7 +137,6 @@ class PreGUICollection:
         self.levelExclusionList = ["Container", "Roof",
                                    "CONTAINER LEVEL", "X LEVEL"]
     def CollectLevels(self):
-        
         # collect levels and level properties
         # enhance the list exclusion so its not so literal
         self.levelObjs = [i for i in FilteredElementCollector(self.doc).OfClass(Level) if i.Name not in self.levelExclusionList]
@@ -124,18 +150,33 @@ class PreGUICollection:
         except:
             # this method does not capture instances of mezzaninne being used as a floor...address this 
             pass
+    def CollectSFWallz(self):
+        # since both nib walls and sf walls need
+        # the sf walls selected and filtered future
+        # selection should SFobjCrv_StartPt here.
+        pass
     def CollectGypWalls(self):
         self.gypWallObjs = [i for i in FilteredElementCollector(self.doc).OfClass(Wall) 
                             if i.Name not in self.familyObj.SFWallTypeNames.keys()
                             and "storefront" not in i.Name.lower()] # storefront also removes curtain wall families
-        self.gypWallNames = set([i.Name for i in self.gypWallObjs])
-        print(self.gypWallNames)
+        
+        self.gypWallTypeIds = [i.GetTypeId() for i in self.gypWallObjs]
+        self.gypWallNames = [i.Name for i in self.gypWallObjs]
+        self.gypWallUniqueNames = set(self.gypWallNames)
+        
+        # create a dict for gypWallNames: gypWallObjs -> goes to SF2_GUI as options -> selection then used in CreateNibWalls
+        # set not necessary bc this loop effectively acts as set by not repeating keys
+        for i,key in enumerate(self.gypWallNames):
+            self.gypWallDict[key] = self.gypWallTypeIds[i]
+        for i in self.gypWallDict.keys():
+            self.gypWallDict_KEYS[i] = i
+        
     def CollectLoadedFamilies(self):
         # IS THIS DOUBLE LOADING?
         # Load familes - its not a load, load but I will clarify this later
         self.loadedFamilies = self.familyObj.SFLoadFamilies(True)
-        print(type(self.loadedFamilies))
-        print(self.loadedFamilies)        
+        #print(type(self.loadedFamilies))
+        #print(self.loadedFamilies)        
     def Run_PreGUIMethods(self):
         # collect levels in doc
         self.CollectLevels()
@@ -166,198 +207,186 @@ class CreateNibWalls:
         self.fixedNibWall_imperial = 6/12
         self.fixedNibWall_metric = 5.90551/12
         self.leftoverTol = 0.35  # Nib wall length
-
-        self.gypWallList = ["Partition-Gyp", "Partition-Gyp 2",
-                            "WWi-Partition-Typical-A1", "WWi-Partition-Typical-A2",
-                            "WWi-Partition-Typical-A3", "WWi-Partition-Typical-A4",
-                            "WWi-Partition-Typical-C1", "WWi-Partition-Typical-C2",
-                            "WWi-Partition-Typical-C3", "WWi-Partition-Typical-C4",
-                            "WWi-Partition-Typical-C5", "WWi-Partition-Typical-C6",
-                            "WWi-Partition-Typical-D1", "WWi-Partition-Typical-D2",
-                            "WWi-Partition-Typical-D3", "WWi-Partition-Typical-D4",
-                            "WWi-Partition-Typical-D5", "WWi-Partition-Typical-D6"]
+        
+        # something
+        self.selectedSystem = None
+        self.selectedPostWidth = None
+        self.selectedOneByWidth = None
+        self.selectedNibWallLength = None
+        self.gypNibWallTypeId = None
+        
+        self.currentLevel = self.currentView.GenLevel
+        
+        # something else
+        self.instName = None
+        self.topConstraint = None
+        self.unconnectedHeight = None
+        self.topOffset = None
+        self.botConstraint = self.currentLevel.Id        
+        
+        self.storefrontWallIds = None
+        self.intersectionPoints = None
     def __repr__(self):
-        return("<class 'CreateNibWalls'>")
-    def Run_CreateNibWalls(self, nibWallLength):
-        # ADD THESE SAVE SETTINGS TO CONFIGURATION LATER DOWN IN THE SCRIPT
-        ## user settings into a dict
-        #config = {"nibWallType": wallTypesDict.keys()[wallTypesDict.values().index(gypNibWallTypeId)],
-                    #"splitOffset" : splitTypes.keys()[splitTypes.values().index(selectedNibLength)]}
-        ##save selected system
-        #storefrontConfig.Run_SaveSFConfigurations(user_configs=config)  
+        return("<class 'CreateNibWalls'>")   
+    
+    def BigMethod(self, SFobj):
+        for p in SFobj.Parameters:
+            if p.Definition.Name == "Top Constraint":
+                self.topConstraint = p.AsElementId() # element Id of top constraint object
+            if p.Definition.Name == "Unconnected Height":
+                self.unconnectedHeight = p.AsDouble()
+            if p.Definition.Name == "Top Offset":
+                self.topOffset = p.AsDouble()
 
-        selectedSystem = self.currentConfig["currentSystem"]
-        postWidth = self.currentConfig["postWidth"]
-        oneByWidth = self.currentConfig["oneByWidth"]
+        # check to see which ends are naked
+        SFobjCrv = SFobj.Location.Curve
+        SFobjCrv_StartPt = SFobjCrv.GetEndPoint(0)
+        SFobjCrv_EndPt = SFobjCrv.GetEndPoint(1)
+        startOverlap = False
+        endOverlap = False
+        
+        # find intersections between collected SF walls
+        self.intersectionPoints = SFU.RemoveDuplicatePoints(SFU.FindWallIntersections(self.storefrontWallIds))
+        
+        
+        if self.intersectionPoints:
+            # compare intersection points with end points of wall,
+            # when they match then an intersection at the wall end is confirmed
+            for point in self.intersectionPoints:
+                if point.DistanceTo(SFobjCrv_StartPt) < self.tol:
+                    startOverlap = True
+                elif point.DistanceTo(SFobjCrv_EndPt) < self.tol:
+                    endOverlap = True
+                if startOverlap and endOverlap:
+                    break
 
-        currentLevel = self.currentView.GenLevel
-        levelName = currentLevel.Name
+        # if only one SFobjCrv_EndPt is touching other walls
+        if startOverlap == False or endOverlap == False:
+            nibWall = None
+            nibWalls = []
+            offset = 0
+            lengthAdjust = (0.5 * self.selectedPostWidth) + self.selectedOneByWidth
+            length = SFobjCrv.Length - lengthAdjust
+            leftover = length%(self.standardSizes[0] + self.selectedOneByWidth)
 
-        gypWall = "Basic Wall - Partition-Gyp"
-        self.currentConfig["nibWallType"] = gypWall       
-
-        gypNibWallTypeId = gypWall
-        selectedNibLength = nibWallLength
-
+            # calculate offset
+            # optimized nib wall split
+            if self.selectedNibWallLength == "OPTIMIZED":
+                
+                numPanels_optimized = math.floor(length / (self.standardSizes[0] + self.selectedOneByWidth))                
+                
+                # if optimized split
+                if leftover > self.leftoverTol:
+                    lastPanelSize = 0
+                    for size in self.standardSizes[1:]:
+                        if leftover - self.leftoverTol >= (size + self.selectedOneByWidth):
+                            lastPanelSize = self.standardSizes[self.standardSizes.index(size)]
+                            break
+                    offset = lengthAdjust + numPanels_optimized*self.standardSizes[0] + (numPanels_optimized)*self.selectedOneByWidth + lastPanelSize + int(lastPanelSize > 0)*self.selectedOneByWidth
+                else:
+                    offset = lengthAdjust + (numPanels_optimized-1)*self.standardSizes[0] + self.standardSizes[1] + (numPanels_optimized)*self.selectedOneByWidth
+            
+            # fixed nib wall split
+            else: offset = SFobjCrv.Length - self.selectedNibWallLength  
+        
+            if startOverlap or (startOverlap == endOverlap):
+                try:
+                    # create new SF and Nib walls
+                    newPoint = XYZ(((SFobjCrv_EndPt.X-SFobjCrv_StartPt.X)*(offset/(length + lengthAdjust)))+SFobjCrv_StartPt.X,((SFobjCrv_EndPt.Y-SFobjCrv_StartPt.Y)*(offset/(length + lengthAdjust)))+SFobjCrv_StartPt.Y, SFobjCrv_StartPt.Z)
+                    SFobj.Location.Curve = Line.CreateBound(SFobjCrv_StartPt, newPoint)
+                    nibWallLine = Line.CreateBound(newPoint,SFobjCrv_EndPt)
+    
+                    SFobjCrv_EndPt = newPoint
+    
+                    nibWalls.append(Wall.Create(self.doc, nibWallLine, self.currentLevel.Id, False))
+                    self.doc.Regenerate()                                        
+                except:
+                    print("Wall {0} was too short to add a nib wall".format(id))
+    
+            if endOverlap or (startOverlap == endOverlap):
+                try:
+                    # create new SF and Nib walls
+                    newPoint = XYZ(((SFobjCrv_StartPt.X-SFobjCrv_EndPt.X)*(offset/(length + lengthAdjust)))+SFobjCrv_EndPt.X,((SFobjCrv_StartPt.Y-SFobjCrv_EndPt.Y)*(offset/(length + lengthAdjust)))+SFobjCrv_EndPt.Y, SFobjCrv_EndPt.Z)
+                    SFobj.Location.Curve = Line.CreateBound(newPoint, SFobjCrv_EndPt)                  
+    
+                    nibWallLine = Line.CreateBound(newPoint,SFobjCrv_StartPt)
+    
+                    SFobjCrv_StartPt = newPoint
+    
+                    nibWalls.append(Wall.Create(self.doc, nibWallLine, self.currentLevel.Id, False))
+                    self.doc.Regenerate()
+                except:
+                    print("Wall {0} was too short to add a nib wall".format(id))                                    
+    
+            if nibWalls:
+                for nibWall in nibWalls:
+                    # it seems like you create walls of whatever type then change type
+                    # but you inherit parameter settings of host wall???
+                    nibWall.WallType = self.doc.GetElement(self.gypNibWallTypeId)
+                    nibTopConstraint = nibWall.get_Parameter(BuiltInParameter.WALL_HEIGHT_TYPE).AsElementId()
+    
+                    if self.topConstraint.IntegerValue == self.botConstraint.IntegerValue:
+                        nibWall.get_Parameter(BuiltInParameter.WALL_HEIGHT_TYPE).Set(ElementId(-1))
+                    else:
+                        nibWall.get_Parameter(BuiltInParameter.WALL_HEIGHT_TYPE).Set(self.topConstraint)
+    
+                    for p in nibWall.Parameters:
+                        if p.Definition.Name == "Location Line":
+                            p.Set(0)
+                        if p.Definition.Name == "Unconnected Height" and self.topConstraint.IntegerValue == -1:
+                            p.Set(self.unconnectedHeight)
+    
+                    self.doc.Regenerate()
+                    if self.topConstraint.IntegerValue == self.botConstraint.IntegerValue:
+                        nibWall.get_Parameter(BuiltInParameter.WALL_USER_HEIGHT_PARAM).Set(self.topOffset)
+    
+    def Run_CreateNibWalls(self):
+        ####################################################
+        ## REDUNDENT - SAME PROCESS AS COLLECTION CLASSES ##
+        ####################################################
         # allow option to only create nib walls on user selected objects
         currentSelectedIds = self.uidoc.Selection.GetElementIds()
 
         if not currentSelectedIds:
             # get storefront walls from view in document
-            storefrontWallIds = [i.Id for i in FilteredElementCollector(self.doc, self.currentView.Id).OfClass(Wall) if i.Name in SFF.FamilyTools(self.doc).SFWallTypeNames]
-        else: storefrontWallIds = currentSelectedIds # clunky fix this
-
-        # returns type(symbol) Id - only need one for this operation, still clunky
-        gypNibWallTypeId = [i.GetTypeId() for i in FilteredElementCollector(self.doc).OfClass(Wall) if i.Name in self.gypWallList][0]
-
-        # TESTS FOR OBTAINING WALL TYPE ID OF OBJECTS NOT CURRENTLY IN REVIT MODEL SPACE
-
-        #wallId = ElementId(BuiltInCategory.OST_Walls)
-        #element = self.doc.GetElement(wallId)
-        #print(element)
-
-        #f = self.app.Create.Filter.NewTypeFilter(Wall)
-        #docWalls = self.doc.get_Elements(f)
-        #print(docWalls)
-
-        intersectionPoints = SFU.RemoveDuplicatePoints(SFU.FindWallIntersections(storefrontWallIds))
-
-        # iterate through either selected walls or SF collected in document
-        if currentSelectedIds:
-            wallsToIterate = currentSelectedIds
-        elif storefrontWallIds:
-            wallsToIterate = storefrontWallIds
-        else:
+            self.storefrontWallIds = [i.Id for i in FilteredElementCollector(self.doc, self.currentView.Id).OfClass(Wall)
+                                 if i.Name in SFF.FamilyTools(self.doc).SFWallTypeNames]
+        else: self.storefrontWallIds = currentSelectedIds
+        
+        # this class takes the recently saved currentConfigs to get data about how to create nib walls
+        self.selectedSystem = self.currentConfig["currentSystem"]
+        self.selectedPostWidth = self.currentConfig["postWidth"]
+        self.selectedOneByWidth = self.currentConfig["oneByWidth"]
+        self.selectedNibWallLength = self.currentConfig["nibWallLength"]
+        # you can't serialize objs so dct of keys calls a dict that is always written in this module with objs as values for the same key indexes
+        self.gypNibWallTypeId = self.gypWallDict[self.currentConfig["nibWallType"]]         
+        
+        if not self.storefrontWallIds:
             Autodesk.Revit.UI.TaskDialog.Show ("ERROR", "No Storefront walls selected or found in the view")
             pyrevit.script.exit()
 
-        with rpw.db.Transaction("Create Nib") as tx:
-            SFU.SupressErrorsAndWarnings(tx) # i added this
-            
-            for id in wallsToIterate:
-                # use id to get element data from revit doc
-                inst = self.doc.GetElement(id)
+        t = Transaction(self.doc, "Create Nib")
+        t.Start()
+        for id in self.storefrontWallIds:
+            # use id to get element data from revit doc
+            SFobj = self.doc.GetElement(id)
 
-                if inst.Category.Name == "Walls":
-                    instName = None
-                    topConstraint = None
-                    unconnectedHeight = None
-                    baseOffset = None
-                    topOffset = None
-                    botConstraint = currentLevel.Id
+            if SFobj.Category.Name == "Walls":
+                # 2 different ways of obtaining parameters (instance name) bc changes in the api
+                try:
+                    self.instName = SFobj.Name.lower()
+                except:
+                    for p in SFobj.Parameters:
+                        if p.Definition.Name == "Name":
+                            self.instName = p.AsString().lower()
 
-                    # 2 different ways of obtaining parameters (instance name) bc changes in the api
-                    try:
-                        instName = inst.Name.lower()
-                    except:
-                        for p in inst.Parameters:
-                            if p.Definition.Name == "Name":
-                                instName = p.AsString().lower()
-
-                    if "storefront" not in instName:
-                        continue
-                    # split storefront wall at index to create nib wall - nib matches parameters of split wall
-                    else:
-                        for p in inst.Parameters:
-                            if p.Definition.Name == "Top Constraint":
-                                topConstraint = p.AsElementId() # element Id of top constraint object
-                            if p.Definition.Name == "Unconnected Height":
-                                unconnectedHeight = p.AsDouble()
-                            if p.Definition.Name == "Top Offset":
-                                topOffset = p.AsDouble()
-
-                        # check to see which ends are naked
-                        instLine = inst.Location.Curve
-                        start = instLine.GetEndPoint(0)
-                        end = instLine.GetEndPoint(1)
-                        startOverlap = False
-                        endOverlap = False
-                        if intersectionPoints:
-                            for point in intersectionPoints:
-                                if point.DistanceTo(start) < self.tol:
-                                    startOverlap = True
-                                elif point.DistanceTo(end) < self.tol:
-                                    endOverlap = True
-                                if startOverlap and endOverlap:
-                                    break
-
-                        # if only one end is touching other walls
-                        if startOverlap == False or endOverlap == False:
-                            nibWall = None
-                            nibWalls = []
-                            offset = 0
-                            lengthAdjust = (0.5 * postWidth) + oneByWidth
-                            length = instLine.Length - lengthAdjust
-                            leftover = length%(self.standardSizes[0] + oneByWidth)
-                            # var for "OPTIMIZED" calculation
-                            numPanels = math.floor(length / (self.standardSizes[0] + oneByWidth))
-
-                            # optimized nib wall split
-                            if selectedNibLength == "OPTIMIZED":
-                                # if optimized split
-                                if leftover > self.leftoverTol:
-                                    lastPanelSize = 0
-                                    for size in self.standardSizes[1:]:
-                                        if leftover - self.leftoverTol >= (size + oneByWidth):
-                                            lastPanelSize = self.standardSizes[self.standardSizes.index(size)]
-                                            break
-                                    offset = lengthAdjust + numPanels*self.standardSizes[0] + (numPanels)*oneByWidth + lastPanelSize + int(lastPanelSize > 0)*oneByWidth
-                                else:
-                                    offset = lengthAdjust + (numPanels-1)*self.standardSizes[0] + self.standardSizes[1] + (numPanels)*oneByWidth
-                            # fixed nib wall split
-                            else:
-                                offset = instLine.Length - selectedNibLength  
-
-                            if startOverlap or (startOverlap == endOverlap):
-                                try:
-                                    newPoint = XYZ(((end.X-start.X)*(offset/(length + lengthAdjust)))+start.X,((end.Y-start.Y)*(offset/(length + lengthAdjust)))+start.Y, start.Z)
-                                    inst.Location.Curve = Line.CreateBound(start, newPoint)
-                                    nibWallLine = Line.CreateBound(newPoint,end)
-
-                                    end = newPoint
-
-                                    nibWalls.append(Wall.Create(self.doc, nibWallLine, currentLevel.Id, False))
-                                    self.doc.Regenerate()                                        
-                                except:
-                                    print("Wall {0} was too short to add a nib wall".format(id))
-
-                            if endOverlap or (startOverlap == endOverlap):
-                                try:
-                                    newPoint = XYZ(((start.X-end.X)*(offset/(length + lengthAdjust)))+end.X,((start.Y-end.Y)*(offset/(length + lengthAdjust)))+end.Y, end.Z)
-                                    inst.Location.Curve = Line.CreateBound(newPoint, end)                  
-
-                                    nibWallLine = Line.CreateBound(newPoint,start)
-
-                                    start = newPoint
-
-                                    nibWalls.append(Wall.Create(self.doc, nibWallLine, currentLevel.Id, False))
-                                    self.doc.Regenerate()
-                                except:
-                                    print("Wall {0} was too short to add a nib wall".format(id))                                    
-
-                            if nibWalls:
-                                for nibWall in nibWalls:
-                                    # it seems like you create walls of whatever type then change type
-                                    # but you inherit parameter settings of host wall???
-                                    nibWall.WallType = self.doc.GetElement(gypNibWallTypeId)
-                                    nibTopConstraint = nibWall.get_Parameter(BuiltInParameter.WALL_HEIGHT_TYPE).AsElementId()
-
-                                    if topConstraint.IntegerValue == botConstraint.IntegerValue:
-                                        nibWall.get_Parameter(BuiltInParameter.WALL_HEIGHT_TYPE).Set(ElementId(-1))
-                                    else:
-                                        nibWall.get_Parameter(BuiltInParameter.WALL_HEIGHT_TYPE).Set(topConstraint)
-
-                                    for p in nibWall.Parameters:
-                                        if p.Definition.Name == "Location Line":
-                                            p.Set(0)
-                                        if p.Definition.Name == "Unconnected Height" and topConstraint.IntegerValue == -1:
-                                            p.Set(unconnectedHeight)
-
-                                    self.doc.Regenerate()
-                                    if topConstraint.IntegerValue == botConstraint.IntegerValue:
-                                        nibWall.get_Parameter(BuiltInParameter.WALL_USER_HEIGHT_PARAM).Set(topOffset)
-                        else:
-                            continue        
+                if "storefront" not in self.instName:
+                    continue
+                # split storefront wall at index to create nib wall - nib matches parameters of split wall
+                else:
+                    self.BigMethod(SFobj)
+            else: continue            
+        t.Commit()      
 
 ################################################################
 ## BASE CLASS C: COLLECT DOC ELEMENTS - FUTURE IMPLEMENTATION ##
@@ -370,6 +399,7 @@ class CollectWallsColumns:
         return("<class 'CollectWallsColumns'>")
     #
     # COLLECT WALLS
+    #
     def CollectSFWalls(self):
         """
         There are three options for selecting walls: first you select items directly
@@ -401,6 +431,7 @@ class CollectWallsColumns:
     
     #
     # COLLECT COLUMNS, LEVELS, LEVEL #s
+    #
     def CollectColumns(self):
         self.allColumns = SFU.GetAllElements(self.doc, BuiltInCategory.OST_Columns, Autodesk.Revit.DB.FamilyInstance, currentView=True) # used eventually in build curtain wall
         self.allColumns += SFU.GetAllElements(self.doc, BuiltInCategory.OST_StructuralColumns, Autodesk.Revit.DB.FamilyInstance, currentView=True) # used eventually in build curtain wall
@@ -411,6 +442,7 @@ class CollectWallsColumns:
         self.levelList = [self.doc.GetElement(id) for id in levelIdList]
     #
     # SORT WALLS BY LEVEL
+    #
     def SortWallsByLevel(self):
         self.interiorWallIds = [i for _,i in sorted(zip(self.interiorWallIds, self.levelNumList))]
 
@@ -427,6 +459,7 @@ class CollectWallsColumns:
 
     #
     # MAIN CLASS ENTRY POINT
+    #
     def Run_CollectWalls(self):
         # collect all walls and columns
         self.CollectSFWalls()
@@ -491,6 +524,7 @@ class CollectSFElements:
         return("<class 'CollectSFElements'>")
     #
     # UTILITIES
+    #
     def FilterSFWalls(self, sfWallObjs):
         # this will filter user selection or collected SF walls
         # into either a full or partial SF list to be used throughout
@@ -505,6 +539,7 @@ class CollectSFElements:
                 self.storefrontPartialIds.append(obj.Id)
     #
     # MAIN STUFF
+    #
     def CollectAllElementsInView(self):
         # collect plan view level and levelId
         self.selectedLevelId = self.currentView.GenLevel.Id
@@ -586,17 +621,18 @@ class CollectSFElements:
             sys.exit()
 
         # Profile widths
-        self.systemPostWidth = self.doc.GetElement(self.mullionDict[self.systemName+"_Post"]).get_Parameter(BuiltInParameter.CUST_MULLION_THICK).AsDouble()
+        self.systemPostWidth = self.doc.GetElement(self.mullionDict["{0}_Post".format(self.systemName)]).get_Parameter(BuiltInParameter.CUST_MULLION_THICK).AsDouble()
 
-        systemDoorFrame = self.doc.GetElement(self.mullionDict[self.systemName+"_DoorFrame"])
+        systemDoorFrame = self.doc.GetElement(self.mullionDict["{0}_DoorFrame".format(self.systemName)])
         systemDoorFrameWidth = systemDoorFrame.get_Parameter(BuiltInParameter.CUST_MULLION_WIDTH2).AsDouble()
         systemDoorFrameWidth += systemDoorFrame.get_Parameter(BuiltInParameter.CUST_MULLION_WIDTH1).AsDouble()
 
-        systemOneBy = self.doc.GetElement(self.mullionDict[self.systemName+"_OneBy"])
+        systemOneBy = self.doc.GetElement(self.mullionDict["{0}_OneBy".format(self.systemName)])
         systemOneByWidth = systemOneBy.get_Parameter(BuiltInParameter.CUST_MULLION_WIDTH2).AsDouble()
         systemOneByWidth += systemOneBy.get_Parameter(BuiltInParameter.CUST_MULLION_WIDTH1).AsDouble()
 
         self.wallTypeCW = wallTypeDict["I-Storefront-"+self.systemName]
+    #@DBG.Profiler(self.WrapAndChain) # check execution time
     def WrapAndChain(self):
         """
         Takes walls that are inline and makes them a single
@@ -690,6 +726,7 @@ class CollectSFElements:
             self.storefrontElevations.append(sfe)
     #
     # MAIN CLASS ENTRY POINT
+    #
     def Run_StorefrontPrep(self):
         
         # need to be able to collect any item, not
@@ -816,7 +853,7 @@ class CheckSFWalls:
                         intersectionTypeOnNeighbor = "Middle"
                         point1 = neighborLocLineEnd
 
-                    # check if intersection is at the start point or end point or middle
+                    # check if intersection is at the SFobjCrv_StartPt point or SFobjCrv_EndPt point or middle
                     if intersection.DistanceTo(self.locLineStart) < self.tol:
                         angle = SFU.AngleThreePoints(self.locLineEnd, intersection, point1)
                         self.storefrontObject.StartNeighbors.append([neighbor.AssemblyID, neighbor.SuperType, angle, intersectionTypeOnNeighbor, intersection])
@@ -862,7 +899,7 @@ class CheckSFWalls:
                                 neighbor.Doors = tempList1
                                 splitNeighbor.Doors = tempList2
     def DetermineConditions(self):
-        # determine start conditions
+        # determine SFobjCrv_StartPt conditions
         self.locLine = self.storefrontObject.HostLine
         self.locLineStart = self.locLine.GetEndPoint(0)
         self.locLineEnd = self.locLine.GetEndPoint(1)
@@ -1004,7 +1041,7 @@ class CheckSFWalls:
                     if "Same" in  cornerTypes and "Different" in cornerTypes and "Different" in inlineTypes:
                         pass
 
-            #Logic gate to set contidions to the right ends either start of end.
+            #Logic gate to set contidions to the right ends either SFobjCrv_StartPt of SFobjCrv_EndPt.
             if i == 0  and neighborSet:
                 self.storefrontObject.StartCondition = conditionToSet
 
@@ -1068,20 +1105,20 @@ class CreateSFCurtainWalls:
                     for mul in mullionList:
                         mul.Pinned = False
                         if condition == "OnGyp":
-                            mul.ChangeTypeId(self.mullionDict[self.systemName + "_WallStart"])
+                            mul.ChangeTypeId(self.mullionDict["{0}_WallStart".format(self.systemName)])
                         elif condition == "OnObstruction":
-                            mul.ChangeTypeId(self.mullionDict[self.systemName + "_WallStart"])
+                            mul.ChangeTypeId(self.mullionDict["{0}_WallStart".format(self.systemName)])
                         elif condition == "OnStorefront":
-                            mul.ChangeTypeId(self.mullionDict[self.systemName + "_WallStart"])
+                            mul.ChangeTypeId(self.mullionDict["{0}_WallStart".format(self.systemName)])
                         elif condition == "JoinStorefront":
                             self.doc.Delete(mul.Id)
                         elif condition == "ForcePost":
-                            mul.ChangeTypeId(self.mullionDict[self.systemName + "_Post"])
+                            mul.ChangeTypeId(self.mullionDict["{0}_Post".format(self.systemName)])
                         elif condition == "ForcePostAtTBone":
-                            mul.ChangeTypeId(self.mullionDict[self.systemName + "_Post"])
+                            mul.ChangeTypeId(self.mullionDict["{0}_Post".format(self.systemName)])
                         elif condition == "Angled":
                             if self.currentConfig["isFramed"]:
-                                mul.ChangeTypeId(self.mullionDict[self.systemName + "_OneBy"])
+                                mul.ChangeTypeId(self.mullionDict["{0}_OneBy".format(self.systemName)])
                             else: 
                                 self.doc.Delete(mul.Id)
 
@@ -1300,7 +1337,7 @@ class ModifySFCurtainWalls:
                     vect0 = doorHandOrientation.Multiply(((doorWidth / 2) + extra0))
                     vect1 = doorHandOrientation.Multiply(((doorWidth / 2) + extra1) * -1)
 
-                    # door end points
+                    # door SFobjCrv_EndPt points
                     door_end0 = doorLocationCenter.Add(vect0)
                     door_end1 = doorLocationCenter.Add(vect1)
 
@@ -1563,7 +1600,8 @@ class BuildSFSystem(CheckSFWalls, CreateSFCurtainWalls,
 
                 wallHostId = self.storefrontObject.HostElementIds[0]
                 self.wtName = self.doc.GetElement(wallHostId).Name
-
+                
+                # this geometry will be entry point from rhino engine
                 self.newWall = None
 
                 if str(hostElement.WallType.Kind) == "Basic":
@@ -1639,7 +1677,7 @@ class GenerateSF(PreGUICollection, CreateNibWalls,
         self.mrTimer = SFU.Timer() # not used so far
         
         # helper family methods
-        self.familyObj = SFF.FamilyTools(self.doc) # instantiates family modules to start extracting data from it in this script - nothing created yet  
+        self.familyObj = SFF.FamilyTools(self.doc) # instantiates family modules to SFobjCrv_StartPt extracting data from it in this script - nothing created yet  
 
         # class inheritance / polymorphism
         PreGUICollection.__init__(self)
@@ -1651,43 +1689,31 @@ class GenerateSF(PreGUICollection, CreateNibWalls,
     def __repr__(self):
         return("<class 'GenerateSF'>")
     def Run_GenerateSF(self):
-        """
-        For fabrication, the families will have to have 
-        parameters that are constantly read and reported. 
-        An automation script will run and generate a list
-        of geometry with the assumption that what is created
-        will get built, but if it gets changed by the user, 
-        a second script will have to be run that signals an
-        update to the storefront system.
-
-        An idea for the future script might be to have a completly
-        new family that is more intelligent and complete. - actually
-        this is the only way this can be accomplished. The old system
-        doesn't matter because Elite will never build it the way it is
-        described above
-        """
         # instantiate variables that need to be fed to GUI
-        # collect elements that determine the current state of the model, what elements currently exist in it
-        # CORRECT FAMILIES NEED TO BE LOADED INTO DOC BEFORE STUFF CAN BEGIN
-        # ALSO REMEMBER THAT DOORS NEED TO BE CORRECTLY PLACED IN SF OTHERWISE THEY FAIL...
         self.Run_PreGUIMethods()
         
-        # instantiate rpw form
-        # select what system will be created and what families must be loaded
-        formObj = SFGUI.SF_Form(self.doc, loadedFamilies=self.loadedFamilies)
+        # instantiate rpw form | what system will be created and what families are loaded
+        formObj = SFGUI.SF_Form(self.doc, 
+                                gypWallOptions=self.gypWallDict_KEYS,
+                                loadedFamilies=self.loadedFamilies)
         formObj.SF_GetUserConfigs()
         
-        # instatiate windows form
+        # instantiate rpw form | what system will be created and what families are loaded
         #formObj = SFGUI.SF_Dialogue(self.doc,
                                      #levelNames=self.levelNames,
                                      #gypWallNames=self.gypWallNames,
                                      #loadedFamilies=self.loadedFamilies)
         #Application.Run(formObj)        
         
-        # set form output to derived parameter
+        
+        """
+        how configs get used: currentConfigs are written by selections made by user configs
+        
+        current configs are saved as json and referenced at SFobjCrv_StartPt of project
+        """
         self.currentConfig = formObj.currentConfig
         
-        # run whole script
+        # run whole script - current currentConfig file fed back to family module
         if formObj.userConfigs["createNibWallOnly"] == False:
             # load families
             SFF.FamilyTools(self.doc).Run_LoadFamilies(self.currentConfig)
@@ -1695,19 +1721,19 @@ class GenerateSF(PreGUICollection, CreateNibWalls,
             # create nib walls
             if formObj.userConfigs["createNibWall"]:
                 if str(self.currentView.ViewType) == "FloorPlan":
-                    self.Run_CreateNibWalls(formObj.userConfigs["nibWallLength"])
+                    self.Run_CreateNibWalls() # shouldn't this be current config? saved userconfigs from form become currentConfig?
                 else:
                     Autodesk.Revit.UI.TaskDialog.Show ("ERROR", "Run the tool in floorplan view only!")
                     pyrevit.script.exit()                
     
-            # collect walls and sort stuff
-            self.Run_StorefrontPrep()
+            ## collect walls and sort stuff
+            #self.Run_StorefrontPrep()
     
-            # build walls from collected elements - sets firing sequence for dependent classes
-            self.Run_BuildSFSystem()
+            ## build walls from collected elements - sets firing sequence for dependent classes
+            #self.Run_BuildSFSystem()
     
-            # check for errors after everything has been built
-            self.CheckErrors()
+            ## check for errors after everything has been built
+            #self.CheckErrors()
         
         # only run nib walls
         elif formObj.userConfigs["createNibWallOnly"] == True:

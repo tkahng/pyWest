@@ -1051,7 +1051,7 @@ def FindWallIntersections(wallList):
         for item in intersectionList:
             if item not in returnList:
                 returnList.append(item)
-        return returnList
+        return(returnList)
     except Exception as inst:
         OutputException(inst)
         pass

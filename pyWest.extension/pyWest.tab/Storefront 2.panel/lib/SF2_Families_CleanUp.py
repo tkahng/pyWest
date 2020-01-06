@@ -64,36 +64,9 @@ class FamilyOptions(IFamilyLoadOptions):
         familyInUse = True
         return(True)
 
-class WasInFamilyUtilities:
-    def CheckConfigUpToDate(self):
-        """
-        Used to check the saved config file to the current working document
-        if they dont match then it promps you to set the config properly for
-        the current document.
-        
-        CHECKS WHETHER FAMILIES ARE LOADED INTO THE DOC OR NOT
-        """
-        # Save when the config was set.
-        projectInfo = self.doc.ProjectInformation
-        projectId = projectInfo.Id.IntegerValue
-        projectName = None
-        for p in projectInfo.Parameters:
-            if p.Definition.Name == "Project Name":
-                projectName = p.AsString()
-
-        todaysDate = ("{0}-{1}-{2}".format(dt.Today.Month, dt.Today.Day, dt.Today.Year))
-
-        configProjectName = self.currentConfig["projectName"]
-        configProjectId = self.currentConfig["projectId"]
-        configDate = self.currentConfig["configDate"]
-        
-        # a nested conditional format is used here if (set of conditions) or (set of conditions)
-        if ((projectName != configProjectName or projectId != configProjectId)
-            or (projectId == configProjectId and todaysDate != configDate)):
-            self.storefront_set_config()
-        else:
-            self.SFLoadFamilies(True)
-
+#################################################
+## THIS CLASS IS NO LONGER BEING CALLED BY GUI ##
+#################################################
 class GUICalledClass:
     def __init__(self):
         # selection options used by SF_GUI
@@ -228,10 +201,10 @@ class FamilyUtilities:
         pass
     def __repr__(self):
         return("<class 'FamilyUtilities'>")
-    #
-    # formerly called FamilySymbolAndTypesFromFamily()
     def BuildFamilySymbol_Type_Dicts(self, familyLoaded):
         """
+        formerly called FamilySymbolAndTypesFromFamily()
+        
         Takes a family and builds a dictionary of its symbol and types.
         """
         try:
@@ -261,6 +234,7 @@ class FamilyUtilities:
             SFU.OutputException(inst)
     #
     # DATA EXCHANGE
+    #
     def JSONSaveConfig(self):
         with open(self.defaultConfigPath, 'w') as outfile:
             json.dump(self.currentConfig, outfile)    
@@ -269,7 +243,7 @@ class FamilyUtilities:
             with open(self.defaultConfigPath) as readFile:
                 jsonstring = readFile.read()
         else: 
-            with open(os.path.dirname(__file__) + "\\default_settings.json") as readFile:
+            with open("{0}\\default_settings.json".format(os.path.dirname(__file__))) as readFile:
                 jsonstring = readFile.read()
 
         jsonstring = jsonstring.replace("null", "0", 100)
@@ -285,8 +259,8 @@ class SetSFConfiguration:
         self.defaultConfigPath = os.path.join(tempfile.gettempdir(), "storefront_default_config.json")
         
         # derived parameters
-        self.systemName = None # to be set by Run_SaveSFConfigurations()
-        self.userConfigs = None # to be set by Run_SaveSFConfigurations()
+        self.systemName = None # to be set by Run_SaveSFCurrentConfig()
+        self.userConfigs = None # to be set by Run_SaveSFCurrentConfig()
         
         # types will be {type: symbolId}, symbol:symbolId} - LOOK INTO THIS
         """
@@ -303,13 +277,22 @@ class SetSFConfiguration:
                                    "Panel-Symbol-Standard" : {"Symbol": None, "Types": {}},
                                    "Panel-Symbol-Custom" : {"Symbol": None, "Types": {}}
                                    }        
+        """
+        As the plug-in runs additional Key:Value pairs are added: 
+        SF settings, levels selected, etc...
         
-        # this blank currentConfig is referenced and modified outside module then sent back...weird address this
-        # SELECTED LEVELS WILL BE FILLED IF A SINGLE VIEW IS SELECTED THAT HAPPENS TO BE A PLAN
-        # WHY ISNT CURRENTSYSTEM AND SELECTEDSYSTEM THE SAME THING???
-        self.currentConfig = {#selectedLevels,
-                              "currentSystem":None,
+        SF2_GUI will ping this module to begin initial dict write.
+        This is based on userConfigs and are further refined by 
+        SF2_Engine. As new key:values are added, the JSON will get updated.
+        """
+        self.currentConfig = {"currentSystem":None,
                               "selectedSystem": None,
+                              "spacingType": None,
+                              "storefrontPaneWidth": None,
+                              
+                              "nibWallType":None,
+                              "nibWallLength":None,                              
+                              
                               "postWidth":None,
                               "oneByWidth":None,
                               "headHeight":None,
@@ -317,8 +300,7 @@ class SetSFConfiguration:
                               "partialSillHeight":None,
                               "hasLowerInfill":None,
                               "deflectionHeadType": None,
-                              "nibWallType":None,
-                              "nibWallLength":None,
+                              
                               "isFramed":None,
                               "profiles":None,
                               "families": self.familiesToLoadDict
@@ -857,7 +839,7 @@ class SetSFConfiguration:
     
     #
     # MAIN METHOD
-    def Run_SaveSFConfigurations(self, systemName=None, userConfigs=None):
+    def Run_SaveSFCurrentConfig(self, systemName=None, userConfigs=None):
         """
         Each system is defined here by their profile dimensions.
         and some other system specific features. These values
@@ -877,11 +859,15 @@ class SetSFConfiguration:
                 self.ExtravegaConfigs()
             elif self.systemName == "MODE":
                 self.ModeConfigs()
-            
-        #Save any other configs selected previously selected by the user.
+        
+        #################################################
+        ## CONVERT & SAVE userConfigs TO currentConfig ##
+        #################################################
         if self.userConfigs:
             for key in self.userConfigs.keys():
+                # if key exists it will add value, if it doesn't it will create key:value pair
                 self.currentConfig[key] = self.userConfigs[key]
+        #print("self.currentConfig: {0}".format(self.currentConfig))
         
         # HOW CAN I GET NIB WALL CONFIGURATIONS TO BE WRITTEN AS WELL?
         self.JSONSaveConfig()
@@ -1106,7 +1092,10 @@ class CreateMullion_Curtain:
 ###################
 ## DERIVED CLASS ##
 ###################
-class FamilyTools(FamilyUtilities, SetSFConfiguration, CreateMullion_Curtain, GUICalledClass):
+class FamilyTools(FamilyUtilities, 
+                  SetSFConfiguration, 
+                  CreateMullion_Curtain, 
+                  GUICalledClass):
     """
     THERE IS NO RUN, CALL CLASS THAT YOU NEED HERE
     BOTH FAMILIES WILL BE INSTANTIATED TOGETHER

@@ -59,8 +59,9 @@ class SF_Form:
                 if key == "levelNames":
                     self.GUI_levelNames = kwargs.values()[i] # kwargs for keyed arguments can be anything in the future
                     print(self.GUI_levelNames)
-                if key == "gypWallNames":
-                    self.GUI_gypWallNames = kwargs.values()[i]
+                if key == "gypWallOptions":
+                    #                         SF2_Engine.gypWallDict
+                    self.GUI_nibWallOptions = kwargs.values()[i]
                 if key == "loadedFamilies":
                     self.GUI_loadedFamilies = kwargs.values()[i]
         
@@ -72,23 +73,17 @@ class SF_Form:
         self.GUI_SF_heightOptions = self.familyObj.GUI_SF_heightOptions     
         self.GUI_SF_divisionOptions = self.familyObj.GUI_SF_divisionOptions      
         self.GUI_SF_panelWidthOptions = self.familyObj.GUI_SF_panelWidthOptions
-        self.GUI_nibWallOptions = self.familyObj.GUI_nibWallOptions
         self.GUI_nibWallLengthOptions = self.familyObj.GUI_nibWallLengthOptions        
         
-        # family and file paths for families
-        self.defaultConfigPath = self.familyObj.defaultConfigPath
-        self.familyDirectory = self.familyObj.familyDirectory
-        self.familiesToLoad = self.familyObj.currentConfig
-        
         # default options for GUI dropdowns
+        self.components = None
+        
         self.defaultSystem = None
         self.defaultHeight = None
         self.defaultDivOption = None
         self.defaultWidthOption = None
-        self.defaultSplitWallOption = None
-        self.defaultNibWallTypeOption = None
-        
-        self.components = None
+        self.defaultNibWallOption = None
+        self.defaultNibWallLengthOption = None
         
         ############################
         ## SetFormOutputs outputs ##
@@ -96,19 +91,75 @@ class SF_Form:
         self.selectedSystem = None
         self.headHeight = None
         self.partialHeadHeight = None
-
+    
         self.spacingType = None
         self.storefrontPaneWidth = None
         self.createNibWall = None
         self.nibWallType = None
+        self.nibWallLength = None
         
-        # THIS IS THE MAIN OUTPUT THAT IS USED BY SF2_ENGINE
-        self.currentConfig = self.familyObj.currentConfig # default, or last selected settings
-        # WHAT IS USING THIS???
-        self.familyObj.JSONLoadConfig()
+        # inherit empty self.currentConfig dict to begin writing data to it in this module
+        # default, or last selected settings
+        self.currentConfig = self.familyObj.currentConfig
+        
         # outputs - used seperately from json files that are written, more flexible
-        self.userConfigs = None
-    
+        self.userConfigs = None        
+        
+        # loads previously saved currentConfig!
+        # if an error points to this location, comment this out, run again to save another json
+        # file, then uncomment this again and start over...
+        self.familyObj.JSONLoadConfig()
+        
+    def SetDefaultFormValues(self):
+        """
+        DEFAULT OPTIONS FOR GUI. IF NO SELF.DEFAULT 
+        VALUES EXIST THEN COMPONENT DEFAULT IS USED
+        """
+        
+        # set default storefront system
+        if not self.currentConfig["selectedSystem"] in self.GUI_SF_systemOptions.values():
+            self.defaultSystem = self.GUI_SF_systemOptions.keys()[0]
+        else:
+            self.defaultSystem = self.GUI_SF_systemOptions.keys()[self.GUI_SF_systemOptions.values().index(self.currentConfig["selectedSystem"])]
+        
+        # set default storefront height
+        if not self.currentConfig["headHeight"] in self.GUI_SF_heightOptions.values():
+            self.defaultHeight = self.GUI_SF_heightOptions.keys()[0]
+        else: 
+            self.defaultHeight = self.GUI_SF_heightOptions.keys()[self.GUI_SF_heightOptions.values().index(self.currentConfig["headHeight"])]
+        
+        
+        
+        
+        # FIX THIS 
+        # set defualt storefront panel division method
+        if not self.currentConfig["spacingType"] in self.GUI_SF_divisionOptions.values():
+            self.defaultDivOption = self.GUI_SF_divisionOptions.keys()[0]
+        else:
+            self.defaultDivOption = self.GUI_SF_divisionOptions.keys()[self.GUI_SF_divisionOptions.values().index(self.currentConfig["spacingType"])]
+            
+            
+            
+            
+        
+        # set default storefront panel width 
+        if not self.currentConfig["storefrontPaneWidth"] in self.GUI_SF_panelWidthOptions.values():
+            self.defaultWidthOption = self.GUI_SF_panelWidthOptions.keys()[0]
+        else:
+            self.defaultWidthOption = self.GUI_SF_panelWidthOptions.keys()[self.GUI_SF_panelWidthOptions.values().index(self.currentConfig["storefrontPaneWidth"])]
+        
+        # set default nib wall type
+        if not self.currentConfig["nibWallType"] in self.GUI_nibWallOptions.values():
+            self.defaultNibWallOption = self.GUI_nibWallOptions.keys()[0]
+        else:
+            self.defaultNibWallOption = self.GUI_nibWallOptions.keys()[self.GUI_nibWallOptions.values().index(self.currentConfig["nibWallType"])]
+       
+        # set default nib wall length
+        if not self.currentConfig["nibWallLength"] in self.GUI_nibWallLengthOptions.values():
+            self.defaultNibWallLengthOption = self.GUI_nibWallLengthOptions.keys()[0]
+        else:
+            self.defaultNibWallLengthOption = self.GUI_nibWallLengthOptions.keys()[self.GUI_nibWallLengthOptions.values().index(self.currentConfig["nibWallLength"])]
+            
     def SetFormComponents(self):
         from rpw.ui.forms import Button, CheckBox, ComboBox, Label, Separator, TextBox # why does this have to be inside method?
         
@@ -133,54 +184,12 @@ class SF_Form:
                            Separator(),
                            CheckBox("checkbox1", "NIB WALL SPLIT", default=True),
                            CheckBox("checkbox2", "NIB WALL SPLIT ONLY", default=False),
-                           ComboBox("combobox6", self.GUI_nibWallOptions, default=self.defaultSplitWallOption),
-                           ComboBox("combobox7", self.GUI_nibWallLengthOptions, default=self.defaultNibWallTypeOption),
+                           ComboBox("combobox6", self.GUI_nibWallOptions, default=self.defaultNibWallOption),
+                           ComboBox("combobox7", self.GUI_nibWallLengthOptions, default=self.defaultNibWallLengthOption),
                       
                            Separator(),
                            Button('Go')
-                           ]  
-        
-    def SetDefaultFormValues(self):
-        """
-        DEFAULT OPTIONS FOR GUI. IF NO SELF.DEFAULT 
-        VALUES EXIST THEN COMPONENT DEFAULT IS USED
-        """
-        
-        # set default storefront system
-        if not self.currentConfig["selectedSystem"] in self.GUI_SF_systemOptions.values():
-            self.defaultSystem = self.GUI_SF_systemOptions.keys()[0]
-        else:
-            self.defaultSystem = self.GUI_SF_systemOptions.keys()[self.GUI_SF_systemOptions.values().index(self.currentConfig["selectedSystem"])]
-        
-        # set default storefront height
-        if not self.currentConfig["headHeight"] in self.GUI_SF_heightOptions.values():
-            self.defaultHeight = self.GUI_SF_heightOptions.keys()[0]
-        else: 
-            self.defaultHeight = self.GUI_SF_heightOptions.keys()[self.GUI_SF_heightOptions.values().index(self.currentConfig["headHeight"])]
-        
-        # set defualt storefront panel division method
-        if not self.currentConfig["spacingType"] in self.GUI_SF_divisionOptions.values():
-            self.defaultDivOption = self.GUI_SF_divisionOptions.keys()[0]
-        else:
-            self.defaultDivOption = self.GUI_SF_divisionOptions.keys()[self.GUI_SF_divisionOptions.values().index(self.currentConfig["spacingType"])]
-        
-        # set default storefront panel width 
-        if not self.currentConfig["storefrontPaneWidth"] in self.GUI_SF_panelWidthOptions.values():
-            self.defaultWidthOption = self.GUI_SF_panelWidthOptions.keys()[0]
-        else:
-            self.defaultWidthOption = self.GUI_SF_panelWidthOptions.keys()[self.GUI_SF_panelWidthOptions.values().index(self.currentConfig["storefrontPaneWidth"])]
-        
-        # set default nib wall type
-        if not self.currentConfig["nibWallType"] in self.GUI_nibWallOptions.values():
-            self.defaultSplitWallOption = self.GUI_nibWallOptions.keys()[0]
-        else:
-            self.defaultSplitWallOption = self.GUI_nibWallOptions.keys()[self.GUI_nibWallOptions.values().index(self.currentConfig["nibWallType"])]
-       
-        # set default nib wall length
-        if not self.currentConfig["splitOffset"] in self.GUI_nibWallLengthOptions.values():
-            self.defaultNibWallTypeOption = self.GUI_nibWallLengthOptions.keys()[0]
-        else:
-            self.defaultNibWallTypeOption = self.GUI_nibWallLengthOptions.keys()[self.GUI_nibWallLengthOptions.values().index(self.currentConfig["splitOffset"])]
+                           ]
     
     def SetFormOutputs(self, form):
         if not form.values:
@@ -191,28 +200,31 @@ class SF_Form:
             self.selectedSystem = form.values["combobox1"]
             self.headHeight = float(form.values["combobox2"])
             self.partialHeadHeight = float(form.values["combobox2"])
+            
             self.spacingType = form.values["combobox4"]
             self.storefrontPaneWidth = float(form.values["combobox5"])
             self.createNibWall = form.values["checkbox1"]
             self.createNibWallOnly = form.values["checkbox2"]
             self.nibWallType = form.values["combobox6"]
+            
             if form.values["combobox7"] == "OPTIMIZED":
-                self.GUI_nibWallLengthOptions = form.values["combobox7"]
+                self.nibWallLength = form.values["combobox7"]
             else:
-                self.GUI_nibWallLengthOptions = float(form.values["combobox7"])
+                self.nibWallLength = float(form.values["combobox7"])
     
     def WriteSFConfigs(self):
         # Save when the config was set.
         projectInfo = self.doc.ProjectInformation
         projectId = projectInfo.Id
-        projectName = None
+        
+        # project name
         for p in projectInfo.Parameters:
             if p.Definition.Name == "Project Name":
                 projectName = p.AsString()
+            else: projectName = None
 
         todaysDate = "{0}-{1}-{2}".format(dt.Today.Month, dt.Today.Day, dt.Today.Year)        
         
-        # can also be used as class outputs directly in code
         self.userConfigs = {"projectName": projectName,
                             "projectId": projectId.IntegerValue,
                             "configDate": todaysDate,
@@ -228,11 +240,11 @@ class SF_Form:
                             "createNibWall": self.createNibWall,
                             "createNibWallOnly": self.createNibWallOnly,
                             "nibWallType": self.nibWallType,
-                            "nibWallLength": self.GUI_nibWallLengthOptions
+                            "nibWallLength": self.nibWallLength
                             }
         
-        # IS THIS SAVING WHAT WILL GET LOADED NEXT TIME?
-        self.familyObj.Run_SaveSFConfigurations(self.selectedSystem, self.userConfigs)
+        # convert userConfigs to currentConfigs + all other currentConfig settings
+        self.familyObj.Run_SaveSFCurrentConfig(self.selectedSystem, self.userConfigs)
     
     def SF_GetUserConfigs(self):
         from rpw.ui.forms import FlexForm
