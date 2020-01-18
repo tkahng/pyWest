@@ -224,6 +224,7 @@ class CreateNibWalls:
         self.topOffset = None
         self.botConstraint = self.currentLevel.Id        
         
+        self.allWallIds = None
         self.storefrontWallIds = None
         self.intersectionPoints = None
     def __repr__(self):
@@ -244,10 +245,6 @@ class CreateNibWalls:
         SFobjCrv_EndPt = SFobjCrv.GetEndPoint(1)
         startOverlap = False
         endOverlap = False
-        
-        # find intersections between collected SF walls
-        self.intersectionPoints = SFU.RemoveDuplicatePoints(SFU.FindWallIntersections(self.storefrontWallIds))
-        
         
         if self.intersectionPoints:
             # compare intersection points with end points of wall,
@@ -350,8 +347,16 @@ class CreateNibWalls:
         if not currentSelectedIds:
             # get storefront walls from view in document
             self.storefrontWallIds = [i.Id for i in FilteredElementCollector(self.doc, self.currentView.Id).OfClass(Wall)
-                                 if i.Name in SFF.FamilyTools(self.doc).SFWallTypeNames]
-        else: self.storefrontWallIds = currentSelectedIds
+                                      if i.Name in SFF.FamilyTools(self.doc).SFWallTypeNames]
+        else:
+            self.storefrontWallIds = currentSelectedIds
+        
+        # Collect all wall Ids in the model
+        self.allWallIds = SFU.GetElementsInView(BuiltInCategory.OST_Walls, Autodesk.Revit.DB.Wall, self.currentView.Id)
+        self.allWallIds = [i for i in SFU.FilterElementsByLevel(self.doc, self.allWallIds, self.currentLevel.Id)]
+        
+        # find intersections between collected SF walls - moved to this location
+        self.intersectionPoints = SFU.RemoveDuplicatePoints(SFU.FindWallIntersections(self.allWallIds))        
         
         # this class takes the recently saved currentConfigs to get data about how to create nib walls
         self.selectedSystem = self.currentConfig["currentSystem"]
