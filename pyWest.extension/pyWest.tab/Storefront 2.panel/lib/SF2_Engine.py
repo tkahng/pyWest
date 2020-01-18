@@ -73,6 +73,15 @@ import SF2_Utility as SFU # noqa E402
 import SF2_QC as SFQC # noqa E402
 import SF2_Families_CleanUp as SFF # noqa E402
 
+
+############################################################
+## TRYING TO UNDERSTAND WHAT IS GOING ON ?                ##
+## SCROLL DOWN TO --> DERIVED CLASS | GENERATE STOREFRONT ##
+##                                                        ##
+## (class GenerateSF)                                     ##
+############################################################
+
+
 ########################################################
 ## STOREFRONT ELEVATION - NOT PART OF ANY INHERITANCE ##
 ########################################################
@@ -88,7 +97,9 @@ ISSUES:
     - if configuration fails it will stall script
 """
 class StorefrontElevation:
-    def __init__(self, _hostElementIds, _line, _superType, _id, _sillHeight, _headHeight, _systemName):	
+    def __init__(self, _hostElementIds, _line,
+                       _superType, _id, _sillHeight, 
+                       _headHeight, _systemName):
         self.AssemblyID = _id
         self.CWElementId = None
         self.EndCondition = None
@@ -115,7 +126,11 @@ class StorefrontElevation:
 ###############################################
 ## BASE CLASS A: COLLECT ELEMENTS FED TO GUI ##
 ###############################################
-class PreGUICollection:
+class Collect_PreGUI:
+    """
+    Must have a way of avoiding the plan view requirement
+    here, perhaps get hosted level of selected wall
+    """    
     def __init__(self):
         # class output variables
         self.levelObjs = []
@@ -136,6 +151,9 @@ class PreGUICollection:
         # mezzanine must be included
         self.levelExclusionList = ["Container", "Roof",
                                    "CONTAINER LEVEL", "X LEVEL"]
+    def __repr__(self):
+        return("<class 'Collect_PreGUI'>")
+    # COLLECT ELMENTS FOR GUI
     def CollectLevels(self):
         # collect levels and level properties
         # enhance the list exclusion so its not so literal
@@ -150,11 +168,6 @@ class PreGUICollection:
         except:
             # this method does not capture instances of mezzaninne being used as a floor...address this 
             pass
-    def CollectSFWallz(self):
-        # since both nib walls and sf walls need
-        # the sf walls selected and filtered future
-        # selection should SFobjCrv_StartPt here.
-        pass
     def CollectGypWalls(self):
         self.gypWallObjs = [i for i in FilteredElementCollector(self.doc).OfClass(Wall) 
                             if i.Name not in self.familyObj.SFWallTypeNames.keys()
@@ -164,19 +177,13 @@ class PreGUICollection:
         self.gypWallNames = [i.Name for i in self.gypWallObjs]
         self.gypWallUniqueNames = set(self.gypWallNames)
         
-        # create a dict for gypWallNames: gypWallObjs -> goes to SF2_GUI as options -> selection then used in CreateNibWalls
+        # create a dict for gypWallNames: gypWallObjs -> goes to SF2_GUI as options -> selection then used in Create_NibWalls
         # set not necessary bc this loop effectively acts as set by not repeating keys
         for i,key in enumerate(self.gypWallNames):
             self.gypWallDict[key] = self.gypWallTypeIds[i]
         for i in self.gypWallDict.keys():
             self.gypWallDict_KEYS[i] = i
-        
-    def CollectLoadedFamilies(self):
-        # IS THIS DOUBLE LOADING?
-        # Load familes - its not a load, load but I will clarify this later
-        self.loadedFamilies = self.familyObj.SFLoadFamilies(True)
-        #print(type(self.loadedFamilies))
-        #print(self.loadedFamilies)        
+    # CLASS ENTRY POINT
     def Run_PreGUIMethods(self):
         # collect levels in doc
         self.CollectLevels()
@@ -187,10 +194,165 @@ class PreGUICollection:
         # create dictionary of families in the doc
         self.CollectGypWalls()
 
+################################################################
+## BASE CLASS B: COLLECT DOC ELEMENTS - FUTURE IMPLEMENTATION ##
+################################################################
+class Collect_Elements:
+    def __init__(self):
+        """
+        Must have a way of avoiding the plan view requirement
+        here, perhaps get hosted level of selected wall
+        """
+        
+        # wall outputs
+        self.allWallIds = None
+        
+        # pyRevit progress bar in console window
+        self.progressIndex = 0.0
+    
+        # derived parameters - CollectAllElementsInView()
+        self.storefrontFullIds = []
+        self.storefrontPartialIds = []
+        self.selectedLevels = []
+        self.storefrontFullLines = []
+        self.storefrontPartialLines = []
+        self.interiorWallsLines = []
+        self.interiorWallsLinesEdges = []
+        self.startingAssembyId = None
+        self.interiorWallIds = None
+        self.columnsLinesEdges = None
+        self.columnsLinesEdgesEC = None
+        self.selectedLevelId = None
+    
+        self.docLoaded = SFU.RevitLoadECDocument(self.doc)
+        self.docEC = self.docLoaded[0]
+        self.ecTransform = self.docLoaded[1]            
+    
+        self.allWallsEC = []
+        self.allLevelsEC = []
+        self.allColumnsEC = []
+        self.wallsLinesEdgesEC = []
+        self.selectedLevelsEC = []
+        self.selectedWallsEC = []
+        self.selectedColumnsEC = []         
+        
+    # COLLECT ELEMENTS
+    def CollectAllWalls(self):
+        # this method is used for finding intersections among walls for nib wall creation
+        
+        # collect all wall ids
+        self.allWallIds = SFU.GetElementsInView(BuiltInCategory.OST_Walls, Autodesk.Revit.DB.Wall, self.currentView.Id)
+        
+        # filter self.allWallIds to contain only those in current plan view
+        self.allWallIds = [i for i in SFU.FilterElementsByLevel(self.doc, self.allWallIds, self.currentLevel.Id)]        
+    def CollectSFWalls(self):
+        """
+        Ways to select SF walls:
+            A) select items directly from the model - doesn't have to be a plan view
+            B) collect items only in the current view if it is also a plan view
+            C) level selection. 
+        """
+        
+        ####################################################
+        ## REDUNDENT - SAME PROCESS AS COLLECTION CLASSES ## FROM NIB WALLS
+        ####################################################
+        # walls collected by user selection -> returns wall id
+        currentSelectedIds = self.uidoc.Selection.GetElementIds()
+    
+        if not currentSelectedIds:
+            # get storefront walls from view in document
+            self.storefrontWallIds = [i.Id for i in FilteredElementCollector(self.doc, self.currentView.Id).OfClass(Wall)
+                                      if i.Name in SFF.FamilyTools(self.doc).SFWallTypeNames]
+        else:
+            self.storefrontWallIds = currentSelectedIds        
+        
+        
+        ###################################################################################################################
+        
+        
+        if currentSelectedIds: 
+            self.interiorWallIds = [self.doc.GetElement(id) for id in currentSelectedIds 
+                                    if self.doc.GetElement(id).Name in SFF.FamilyTools(self.doc).SFWallTypeNames.keys()]
+            
+        if str(self.currentView.ViewType) == "FloorPlan":
+            pass
+
+        # walls collected by code -> returns wall object -> Autodesk.Revit.DB.Wall - defines <type 'Wall'>
+        if not currentSelectedIds and self.currentViewOnly == True:
+            # level of current view
+            self.selectedLevelId = self.currentView.GenLevel.Id
+            self.selectedLevelObj = self.doc.GetElement(self.selectedLevelId)            
+            
+            self.interiorWallIds = [i for i in FilteredElementCollector(self.doc, self.currentView.Id).OfClass(Wall)
+                                    if i.Name in SFF.FamilyTools(self.doc).SFWallTypeNames.keys()]
+        elif not currentSelectedIds and self.currentViewOnly == False:
+            self.interiorWallIds = [i for i in FilteredElementCollector(self.doc).OfClass(Wall)
+                                    if i.Name in SFF.FamilyTools(self.doc).SFWallTypeNames.keys()]
+
+        # check to make sure there are SF walls in the model
+        if self.interiorWallIds: return()
+        else: raise Esception("There are no walls in the model")
+    def CollectColumns(self):
+        self.allColumns = SFU.GetAllElements(self.doc, BuiltInCategory.OST_Columns, Autodesk.Revit.DB.FamilyInstance, currentView=True) # used eventually in build curtain wall
+        self.allColumns += SFU.GetAllElements(self.doc, BuiltInCategory.OST_StructuralColumns, Autodesk.Revit.DB.FamilyInstance, currentView=True) # used eventually in build curtain wall
+
+    def CollectWallLevels(self):
+        # obtain level ids then use ids to collect elements
+        levelIdList = [i.LevelId for i in self.interiorWallIds]
+        self.levelList = [self.doc.GetElement(id) for id in levelIdList]        
+    def CollectWallColumnEdges(self):
+        # collect perimeter/collision geometry from EC model
+        if self.docEC:
+            levelElevationEC = None 
+            for p in self.selectedLevelObj.Parameters:
+                if p.Definition.Name == "Elevation":
+                    levelElevationEC = p.AsDouble()
+            
+            self.selectedWallsEC = SFU.FilterElementsByLevel(self.docEC, self.allWallsEC, levelElevationEC)
+            self.selectedColumnsEC = SFU.FilterElementsByLevel(self.docEC, self.allColumnsEC, levelElevationEC)
+            
+            self.wallsLinesEdgesEC = SFU.GetWallEdgeCurves(self.docEC, self.selectedWallsEC, self.ecTransform)
+            self.columnsLinesEdgesEC = SFU.GetColumnEdgeCurves(self.docEC, self.selectedColumnsEC, self.ecTransform)
+
+        # collect perimeter/collision geometry from Design model
+        self.interiorWallsLinesEdges = SFU.GetWallEdgeCurves(self.doc, self.interiorWallIds, None)
+        self.columnsLinesEdges = SFU.GetColumnEdgeCurves(self.doc, selectedColumns)        
+    def CollectLoadedFamilies(self):
+        # IS THIS DOUBLE LOADING?
+        # Load familes - its not a load, load but I will clarify this later
+        self.loadedFamilies = self.familyObj.SFLoadFamilies(True)
+        #print(type(self.loadedFamilies))
+        #print(self.loadedFamilies)        
+    # SORT/FILTER ELEMENTS
+    def SortWallsByLevel(self):
+        self.interiorWallIds = [i for _,i in sorted(zip(self.interiorWallIds, self.levelNumList))]
+    def GroupWallsByLevel(self):
+        setList = sorted(set(self.levelNumList))
+
+        #self.self.nestedWallList = []
+        for i in setList:
+            tempList = []
+            for j, wall in enumerate(self.interiorWallIds):
+                if self.levelNumList[j] == i:
+                    tempList.append(wall)
+            self.nestedWallList.append(tempList)    
+    # CLASS ENTRY POINT
+    def Run_CollectWalls(self):
+        # collect all walls and columns
+        self.CollectSFWalls()
+        self.CollectColumns()
+
+        # get levels of each wall
+        self.CollectWallLevels()
+        self.CollectLevelNumbers()
+
+        # group walls by level
+        sortedNestedWallList = self.GroupWallsByLevel()
+
 ##########################################
-## BASE CLASS B: SPLIT STOREFRONT WALLS ##
+## BASE CLASS C: SPLIT STOREFRONT WALLS ##
 ##########################################
-class CreateNibWalls:
+class Create_NibWalls:
     """
     SINCE THIS CLASS IS MOSTLY SELF CONTAINED, THE VARIABLES
     WITH THE SAME NAME HERE WILL NOT BE MADE .SELF CLASS
@@ -224,12 +386,10 @@ class CreateNibWalls:
         self.topOffset = None
         self.botConstraint = self.currentLevel.Id        
         
-        self.allWallIds = None
         self.storefrontWallIds = None
         self.intersectionPoints = None
     def __repr__(self):
-        return("<class 'CreateNibWalls'>")   
-    
+        return("<class 'Create_NibWalls'>")   
     def BigMethod(self, SFobj):
         for p in SFobj.Parameters:
             if p.Definition.Name == "Top Constraint":
@@ -338,24 +498,7 @@ class CreateNibWalls:
                         nibWall.get_Parameter(BuiltInParameter.WALL_USER_HEIGHT_PARAM).Set(self.topOffset)
     
     def Run_CreateNibWalls(self):
-        ####################################################
-        ## REDUNDENT - SAME PROCESS AS COLLECTION CLASSES ##
-        ####################################################
-        # allow option to only create nib walls on user selected objects
-        currentSelectedIds = self.uidoc.Selection.GetElementIds()
-
-        if not currentSelectedIds:
-            # get storefront walls from view in document
-            self.storefrontWallIds = [i.Id for i in FilteredElementCollector(self.doc, self.currentView.Id).OfClass(Wall)
-                                      if i.Name in SFF.FamilyTools(self.doc).SFWallTypeNames]
-        else:
-            self.storefrontWallIds = currentSelectedIds
-        
-        # Collect all wall Ids in the model
-        self.allWallIds = SFU.GetElementsInView(BuiltInCategory.OST_Walls, Autodesk.Revit.DB.Wall, self.currentView.Id)
-        self.allWallIds = [i for i in SFU.FilterElementsByLevel(self.doc, self.allWallIds, self.currentLevel.Id)]
-        
-        # find intersections between collected SF walls - moved to this location
+        # find intersections between all walls in model/model level
         self.intersectionPoints = SFU.RemoveDuplicatePoints(SFU.FindWallIntersections(self.allWallIds))        
         
         # this class takes the recently saved currentConfigs to get data about how to create nib walls
@@ -392,90 +535,6 @@ class CreateNibWalls:
                     self.BigMethod(SFobj)
             else: continue            
         t.Commit()      
-
-################################################################
-## BASE CLASS C: COLLECT DOC ELEMENTS - FUTURE IMPLEMENTATION ##
-################################################################
-class CollectWallsColumns:
-    def __init__(self, currentViewOnly=True):
-        # input parameters
-        self.currentViewOnly = currentViewOnly
-    def __repr__(self):
-        return("<class 'CollectWallsColumns'>")
-    #
-    # COLLECT WALLS
-    #
-    def CollectSFWalls(self):
-        """
-        There are three options for selecting walls: first you select items directly
-        from the model - doesn't have to be a plan view. Second, you collect items only
-        in the current view if it is also a plan view. Third is from the level selection. 
-        """
-        # walls collected by user selection -> returns wall object
-        selectionIdList = self.uidoc.Selection.GetElementIds()
-        if selectionIdList: 
-            self.interiorWallIds = [self.doc.GetElement(id) for id in selectionIdList 
-                                    if self.doc.GetElement(id).Name in SFF.FamilyTools(self.doc).SFWallTypeNames.keys()]
-
-        # walls collected by code -> returns wall object -> Autodesk.Revit.DB.Wall - defines <type 'Wall'>
-        if not selectionIdList and self.currentViewOnly == True:
-            # level of current view
-            self.selectedLevelId = self.currentView.GenLevel.Id
-            self.selectedLevelObj = self.doc.GetElement(self.selectedLevelId)            
-            
-            self.interiorWallIds = [i for i in FilteredElementCollector(self.doc, self.currentView.Id).OfClass(Wall)
-                                    if i.Name in SFF.FamilyTools(self.doc).SFWallTypeNames.keys()]
-        elif not selectionIdList and self.currentViewOnly == False:
-            self.interiorWallIds = [i for i in FilteredElementCollector(self.doc).OfClass(Wall)
-                                    if i.Name in SFF.FamilyTools(self.doc).SFWallTypeNames.keys()]
-
-        # check to make sure there are SF walls in the model
-        if self.interiorWallIds: return()
-        else: raise Esception("There are no walls in the model")
-    
-    
-    #
-    # COLLECT COLUMNS, LEVELS, LEVEL #s
-    #
-    def CollectColumns(self):
-        self.allColumns = SFU.GetAllElements(self.doc, BuiltInCategory.OST_Columns, Autodesk.Revit.DB.FamilyInstance, currentView=True) # used eventually in build curtain wall
-        self.allColumns += SFU.GetAllElements(self.doc, BuiltInCategory.OST_StructuralColumns, Autodesk.Revit.DB.FamilyInstance, currentView=True) # used eventually in build curtain wall
-
-    def CollectWallLevels(self):
-        # obtain level ids then use ids to collect elements
-        levelIdList = [i.LevelId for i in self.interiorWallIds]
-        self.levelList = [self.doc.GetElement(id) for id in levelIdList]
-    #
-    # SORT WALLS BY LEVEL
-    #
-    def SortWallsByLevel(self):
-        self.interiorWallIds = [i for _,i in sorted(zip(self.interiorWallIds, self.levelNumList))]
-
-    def GroupWallsByLevel(self):
-        setList = sorted(set(self.levelNumList))
-
-        #self.self.nestedWallList = []
-        for i in setList:
-            tempList = []
-            for j, wall in enumerate(self.interiorWallIds):
-                if self.levelNumList[j] == i:
-                    tempList.append(wall)
-            self.nestedWallList.append(tempList)
-
-    #
-    # MAIN CLASS ENTRY POINT
-    #
-    def Run_CollectWalls(self):
-        # collect all walls and columns
-        self.CollectSFWalls()
-        self.CollectColumns()
-
-        # get levels of each wall
-        self.CollectWallLevels()
-        self.CollectLevelNumbers()
-
-        # group walls by level
-        sortedNestedWallList = self.GroupWallsByLevel()
 
 ###################################################
 ## BASE CLASS C: COLLECT DOC ELEMENTS - ORIGINAL ##
@@ -527,9 +586,7 @@ class CollectSFElements:
         self.storefrontElevations = []
     def __repr__(self):
         return("<class 'CollectSFElements'>")
-    #
     # UTILITIES
-    #
     def FilterSFWalls(self, sfWallObjs):
         # this will filter user selection or collected SF walls
         # into either a full or partial SF list to be used throughout
@@ -542,9 +599,7 @@ class CollectSFElements:
                 self.storefrontFullIds.append(obj.Id)
             elif obj.Name in self.familyObj.SFWallTypeNames.keys() and self.familyObj.SFWallTypeNames[obj.Name] == 1:
                 self.storefrontPartialIds.append(obj.Id)
-    #
     # MAIN STUFF
-    #
     def CollectAllElementsInView(self):
         # collect plan view level and levelId
         self.selectedLevelId = self.currentView.GenLevel.Id
@@ -729,9 +784,7 @@ class CollectSFElements:
             if wallDoors:
                 sfe.Doors = wallDoors
             self.storefrontElevations.append(sfe)
-    #
     # MAIN CLASS ENTRY POINT
-    #
     def Run_StorefrontPrep(self):
         
         # need to be able to collect any item, not
@@ -1621,9 +1674,10 @@ class BuildSFSystem(CheckSFWalls, CreateSFCurtainWalls,
 ################################
 class PostSFErrorCheck:
     """
-    THIS CLASS STRUCTURE IS OVERLY COMPLEX FOR JUST A CALL
-    TO AN OUTSIDE MODULE BUT ITS HERE TO SERVE A PLACE HOLDER
-    FOR A PRE ERROR CHECK/MODEL QC CLASS THAT WILL BE DEVELOPED
+    This class structure is overly complex for just calling an
+    oustide module but it is here to serve as a placeholder
+    for an eventual pre-error model/checker QC class that will
+    be developed at a later point.
     """
     def __init__(self):
         pass
@@ -1631,14 +1685,16 @@ class PostSFErrorCheck:
         return("<class 'PostSFErrorCheck'>")
     def CheckErrors(self):
         print("...CHECKING ERRORS...")
-        # WHERE IN THE F IS THIS???
         SFQC.SFCheckErrors().Run_SFCheckErrors()
         print("...DONE! YOU MAY CLOSE THIS WINDOW")
 
-#########################################
-## DERIVED CLASS | GENERATE STOREFRONT ##
-#########################################
-class GenerateSF(PreGUICollection, CreateNibWalls, 
+#############################################
+## TRYING TO UNDERSTAND WHAT IS GOING ON ? ##
+## START HERE !                            ##
+##                                         ##
+## DERIVED CLASS | GENERATE STOREFRONT     ##
+#############################################
+class GenerateSF(Collect_PreGUI, Create_NibWalls, 
                  CollectSFElements, ParseSFWalls_Rhino, 
                  BuildSFSystem, PostSFErrorCheck):
     """
@@ -1685,8 +1741,8 @@ class GenerateSF(PreGUICollection, CreateNibWalls,
         self.familyObj = SFF.FamilyTools(self.doc) # instantiates family modules to SFobjCrv_StartPt extracting data from it in this script - nothing created yet  
 
         # class inheritance / polymorphism
-        PreGUICollection.__init__(self)
-        CreateNibWalls.__init__(self)
+        Collect_PreGUI.__init__(self)
+        Create_NibWalls.__init__(self)
         CollectSFElements.__init__(self)
         ParseSFWalls_Rhino.__init__(self)
         BuildSFSystem.__init__(self) # DERIVED CLASS WITH ITS OWN INHERITANCES
@@ -1731,19 +1787,19 @@ class GenerateSF(PreGUICollection, CreateNibWalls,
                     Autodesk.Revit.UI.TaskDialog.Show ("ERROR", "Run the tool in floorplan view only!")
                     pyrevit.script.exit()                
     
-            ## collect walls and sort stuff
-            #self.Run_StorefrontPrep()
+            # collect walls and sort stuff
+            self.Run_StorefrontPrep()
     
-            ## build walls from collected elements - sets firing sequence for dependent classes
-            #self.Run_BuildSFSystem()
+            # build walls from collected elements - sets firing sequence for dependent classes
+            self.Run_BuildSFSystem()
     
-            ## check for errors after everything has been built
-            #self.CheckErrors()
+            # check for errors after everything has been built
+            self.CheckErrors()
         
         # only run nib walls
         elif formObj.userConfigs["createNibWallOnly"] == True:
             if str(self.currentView.ViewType) == "FloorPlan":
-                self.Run_CreateNibWalls(formObj.userConfigs["nibWallLength"])
+                self.Run_CreateNibWalls()
             else:
                 Autodesk.Revit.UI.TaskDialog.Show ("ERROR", "Run the tool in floorplan view only!")
                 pyrevit.script.exit()                 
