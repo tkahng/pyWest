@@ -194,15 +194,276 @@ class Collect_PreGUI:
         # create dictionary of families in the doc
         self.CollectGypWalls()
 
+###################################################
+## BASE CLASS B: COLLECT DOC ELEMENTS - ORIGINAL ##
+###################################################
+class CollectSFElements:
+    def __init__(self):
+        # pyRevit progress bar in console window
+        self.progressIndex = 0.0
+        
+        # derived parameters - CollectAllElementsInView()
+        self.storefrontFullIds = []
+        self.storefrontPartialIds = []
+        self.selectedLevels = []
+        self.storefrontFullLines = []
+        self.storefrontPartialLines = []
+        self.interiorWallsLines = []
+        self.interiorWallsLinesEdges = []
+        self.startingAssembyId = None
+        self.interiorWallIds = None
+        self.columnsLinesEdges = None
+        self.columnsLinesEdgesEC = None
+        self.selectedLevelId = None
+
+        self.docLoaded = SFU.RevitLoadECDocument(self.doc)
+        self.docEC = self.docLoaded[0]
+        self.ecTransform = self.docLoaded[1]            
+
+        self.allWallsEC = []
+        self.allLevelsEC = []
+        self.allColumnsEC = []
+        self.wallsLinesEdgesEC = []
+        self.selectedLevelsEC = []
+        self.selectedWallsEC = []
+        self.selectedColumnsEC = [] 
+
+        # derived parameters - Prep()
+        self.wallTypeCW = None
+        self.wallDoorHostDict = None
+        self.storefrontConfig = None # this is gui object and eventual user selections
+        self.systemName = None
+        self.mullionDict = None
+        self.doorDict = None
+        self.panelTypeDict = None
+        self.storefrontSpacingType = None
+        self.storefrontPaneWidth = None
+        self.systemPostWidth = None
+
+        # derived parameters - WrapAndChain()
+        self.storefrontElevations = []
+    def __repr__(self):
+        return("<class 'CollectSFElements'>")
+    # UTILITIES
+    def FilterSFWalls(self, sfWallObjs):
+        # this will filter user selection or collected SF walls
+        # into either a full or partial SF list to be used throughout
+        for i,data in enumerate(sfWallObjs):
+            # Autodesk.Revit.DB.ElementId
+            if type(data) is ElementId:
+                obj = self.doc.GetElement(data)
+            else: obj = data
+            if obj.Name in self.familyObj.SFWallTypeNames.keys() and self.familyObj.SFWallTypeNames[obj.Name] == 0:
+                self.storefrontFullIds.append(obj.Id)
+            elif obj.Name in self.familyObj.SFWallTypeNames.keys() and self.familyObj.SFWallTypeNames[obj.Name] == 1:
+                self.storefrontPartialIds.append(obj.Id)
+    # MAIN STUFF
+    def CollectAllElementsInView(self):
+        # collect plan view level and levelId
+        self.selectedLevelId = self.currentView.GenLevel.Id
+        self.selectedLevelObj = self.doc.GetElement(self.selectedLevelId)
+
+        allColumns = SFU.GetAllElements(self.doc, BuiltInCategory.OST_Columns, Autodesk.Revit.DB.FamilyInstance, currentView=True)
+        allColumns += SFU.GetAllElements(self.doc, BuiltInCategory.OST_StructuralColumns, Autodesk.Revit.DB.FamilyInstance, currentView=True)
+        
+        # collect all SF walls in view
+        self.interiorWallIds = [i.Id for i in FilteredElementCollector(self.doc, self.currentView.Id).OfClass(Wall) if i.Name in self.familyObj.SFWallTypeNames.keys()]
+        
+        currentSelectedIds = list(self.uidoc.Selection.GetElementIds())
+        if currentSelectedIds:
+            self.FilterSFWalls(currentSelectedIds)                   
+        else:
+            self.FilterSFWalls(FilteredElementCollector(self.doc, self.currentView.Id).OfClass(Wall))
+
+        # this might be used to track each assembly - possibly for fabrication?
+        # collect existing storefront curtain walls and check their Marks to ensure they incrememt. 
+        # so that mark numbers can be consecutive?
+        self.startingAssembyId = 0
+        storefrontWallsInView = rpw.db.Collector(of_class='Wall', view=self.currentView, where=lambda x: str(x.WallType.Kind) == "Curtain")
+
+
+        tempList = []
+        for storefrontInView in storefrontWallsInView:
+            mark = storefrontInView.get_Parameter(BuiltInParameter.ALL_MODEL_MARK).AsString()
+            if mark:
+                tempList.append(int(mark[mark.index("-")+1:]))
+        if tempList:
+            sortedList = sorted(tempList)
+            self.startingAssembyId = sortedList[-1]
+
+        # makes sure no stacked walls are included.    
+        tempList = []
+        for wallId in self.interiorWallIds:
+            wall = self.doc.GetElement(wallId)
+            if not wall.IsStackedWallMember:
+                tempList.append(wallId)
+        self.interiorWallIds = tempList
+
+        # Sort lists by level
+        self.storefrontFullIds = SFU.FilterElementsByLevel(self.doc, self.storefrontFullIds, self.selectedLevelId)
+        self.storefrontPartialIds = SFU.FilterElementsByLevel(self.doc, self.storefrontPartialIds, self.selectedLevelId)
+        self.interiorWallIds = SFU.FilterElementsByLevel(self.doc, self.interiorWallIds, self.selectedLevelId)
+        selectedColumns = SFU.FilterElementsByLevel(self.doc, allColumns, self.selectedLevelId)
+
+        # collect perimeter/collision geometry from EC model
+        if self.docEC:
+            levelElevationEC = None 
+            for p in self.selectedLevelObj.Parameters:
+                if p.Definition.Name == "Elevation":
+                    levelElevationEC = p.AsDouble()
+            self.selectedWallsEC = SFU.FilterElementsByLevel(self.docEC, self.allWallsEC, levelElevationEC)
+            self.selectedColumnsEC = SFU.FilterElementsByLevel(self.docEC, self.allColumnsEC, levelElevationEC)
+            self.wallsLinesEdgesEC = SFU.GetWallEdgeCurves(self.docEC, self.selectedWallsEC, self.ecTransform)
+            self.columnsLinesEdgesEC = SFU.GetColumnEdgeCurves(self.docEC, self.selectedColumnsEC, self.ecTransform)
+
+        # collect perimeter/collision geometry from Design model
+        self.interiorWallsLinesEdges = SFU.GetWallEdgeCurves(self.doc, self.interiorWallIds, None)
+        self.columnsLinesEdges = SFU.GetColumnEdgeCurves(self.doc, selectedColumns)
+
+        levelElevation = self.selectedLevelObj.Elevation
+    def Prep(self):
+        self.systemName = self.currentConfig["currentSystem"]
+
+        self.storefrontPaneWidth = self.currentConfig["storefrontPaneWidth"]
+        self.storefrontSpacingType = self.currentConfig["spacingType"]
+
+        self.mullionDict = SFU.GetMullionTypeDict(self.doc)
+        self.panelTypeDict = SFU.GetWindowTypeDict()
+        self.doorDict = self.currentConfig["systemDoors"]
+        wallTypeDict = SFU.GetWallTypeDict()
+        self.wallDoorHostDict = SFU.GetDoorDictByWallHost()
+
+        # Ensure walltypes are loaded
+        if not "I-Storefront-"+ self.systemName in wallTypeDict.keys():
+            Autodesk.Revit.UI.TaskDialog.Show ("ERROR", "Make sure you selected/loaded the correct partition system. Check your wall types.")
+            sys.exit()
+
+        # Profile widths
+        self.systemPostWidth = self.doc.GetElement(self.mullionDict["{0}_Post".format(self.systemName)]).get_Parameter(BuiltInParameter.CUST_MULLION_THICK).AsDouble()
+
+        systemDoorFrame = self.doc.GetElement(self.mullionDict["{0}_DoorFrame".format(self.systemName)])
+        systemDoorFrameWidth = systemDoorFrame.get_Parameter(BuiltInParameter.CUST_MULLION_WIDTH2).AsDouble()
+        systemDoorFrameWidth += systemDoorFrame.get_Parameter(BuiltInParameter.CUST_MULLION_WIDTH1).AsDouble()
+
+        systemOneBy = self.doc.GetElement(self.mullionDict["{0}_OneBy".format(self.systemName)])
+        systemOneByWidth = systemOneBy.get_Parameter(BuiltInParameter.CUST_MULLION_WIDTH2).AsDouble()
+        systemOneByWidth += systemOneBy.get_Parameter(BuiltInParameter.CUST_MULLION_WIDTH1).AsDouble()
+
+        self.wallTypeCW = wallTypeDict["I-Storefront-"+self.systemName]
+
+    def WrapAndChain(self):
+        """
+        Takes walls that are inline and makes them a single
+        wall element so that you dont get segmented walls that
+        are supposed to be a single continuous elevation.
+        """
+        assemblyId = self.startingAssembyId
+        self.storefrontElevations = []
+        storefrontFullAndPartial = []
+
+        for wallId in self.storefrontFullIds:
+            storefrontFullAndPartial.append([wallId,"Full"])
+        for wallId in self.storefrontPartialIds:
+            storefrontFullAndPartial.append([wallId,"Partial"])
+
+        # Make SF Objects
+        for item1 in storefrontFullAndPartial:
+            wallId1 = item1[0]
+            wallStorefrontType1 = item1[1]
+
+            wall1 = self.doc.GetElement(wallId1)
+            wall1LocationCurve = wall1.Location.Curve
+
+            wallDoors = []
+            wallHostIds = [wallId1]
+
+            if wallId1 in self.wallDoorHostDict.keys():
+                wallDoors = self.wallDoorHostDict[wallId1]
+
+            ## PROFILE THIS SECTION ##########################################################################
+
+            # Chain Searching
+            # Find neighbors and chain them if they are in-line.
+            searchingForChain = True
+            while searchingForChain:
+                foundNeighbor = False
+                wall1Start = wall1LocationCurve.GetEndPoint(0)
+                wall1End = wall1LocationCurve.GetEndPoint(1)
+                wall1Endpoints = [wall1Start, wall1End]
+
+                for item2 in storefrontFullAndPartial:
+                    wallId2 = item2[0]
+                    wallStorefrontType2 = item2[1]
+
+                    if wallId1 != wallId2 and wallStorefrontType1 == wallStorefrontType2:
+                        wall2 = self.doc.GetElement(wallId2)
+                        wall2LocationCurve = wall2.Location.Curve
+                        wall2Start = wall2LocationCurve.GetEndPoint(0)
+                        wall2End = wall2LocationCurve.GetEndPoint(1)
+                        wall2Endpoints = [wall2Start, wall2End]
+                        for i in range(len(wall1Endpoints)):
+                            point1a = wall1Endpoints[i]
+                            point1b = wall1Endpoints[i-1]
+                            for j in range(len(wall2Endpoints)):
+                                point2a = wall2Endpoints[j]
+                                point2b = wall2Endpoints[j-1]
+                                dist = point1a.DistanceTo(point2a)
+                                if dist < self.tol:
+                                    angle = SFU.AngleThreePoints(point1b, point1a, point2b)
+                                    if abs(angle-180) < self.tol:
+                                        wallHostIds += [wallId2]
+                                        storefrontFullAndPartial.remove(item2)
+                                        if wallId2 in self.wallDoorHostDict.keys():
+                                            wallDoors += self.wallDoorHostDict[wallId2]
+                                        wall1LocationCurve = Line.CreateBound(point1b, point2b)
+                                        foundNeighbor = True
+                                        break
+                    if foundNeighbor:
+                        break
+                if not foundNeighbor:
+                    searchingForChain = False
+
+            ## PROFILE THIS SECTION ##########################################################################
+
+            # Create SF Object
+            assemblyId += 1
+
+            if wallStorefrontType1 == "Full":
+                sillH = self.currentConfig["fullSillHeight"]
+            elif wallStorefrontType1 == "Partial":
+                if self.currentConfig["hasLowerInfill"]:
+                    sillH = self.currentConfig["fullSillHeight"]
+                else:
+                    sillH = self.currentConfig["partialSillHeight"]
+
+            headH = self.currentConfig["headHeight"]
+            sfe = StorefrontElevation(wallHostIds, wall1LocationCurve, wallStorefrontType1, assemblyId, sillH, headH, self.systemName)
+            # Doors
+            if wallDoors:
+                sfe.Doors = wallDoors
+            self.storefrontElevations.append(sfe)
+    # MAIN CLASS ENTRY POINT
+    def Run_StorefrontPrep(self):
+        
+        # need to be able to collect any item, not
+        # just those in a view
+        
+        self.CollectAllElementsInView()
+        self.Prep()
+        self.WrapAndChain()
+        
 ################################################################
 ## BASE CLASS B: COLLECT DOC ELEMENTS - FUTURE IMPLEMENTATION ##
 ################################################################
 class Collect_Elements:
-    def __init__(self):
+    def __init__(self, selectionType):
         """
         Must have a way of avoiding the plan view requirement
         here, perhaps get hosted level of selected wall
         """
+        
+        # input parameters
+        self.selectionType = selectionType
         
         # wall outputs
         self.allWallIds = None
@@ -246,36 +507,26 @@ class Collect_Elements:
         # filter self.allWallIds to contain only those in current plan view
         self.allWallIds = [i for i in SFU.FilterElementsByLevel(self.doc, self.allWallIds, self.currentLevel.Id)]        
     def CollectSFWalls(self):
-        """
-        Ways to select SF walls:
-            A) select items directly from the model - doesn't have to be a plan view
-            B) collect items only in the current view if it is also a plan view
-            C) level selection. 
-        """
+        # A) walls collected by user selection -> returns wall id
+        currentSelectedIds = [i for i in self.uidoc.Selection.GetElementIds()] # GetElementIds is a .net enumerator
+        if currentSelectedIds:
+            currentSelectedObjs = [self.doc.GetElement(i) for i in currentSelectedIds]
+            currentSelectedIdsLevelIds = []
         
-        ####################################################
-        ## REDUNDENT - SAME PROCESS AS COLLECTION CLASSES ## FROM NIB WALLS
-        ####################################################
-        # walls collected by user selection -> returns wall id
-        currentSelectedIds = self.uidoc.Selection.GetElementIds()
-    
+        # B) if not level selected from GUI and str(self.currentView.ViewType) == "FloorPlan":
+        
         if not currentSelectedIds:
             # get storefront walls from view in document
             self.storefrontWallIds = [i.Id for i in FilteredElementCollector(self.doc, self.currentView.Id).OfClass(Wall)
                                       if i.Name in SFF.FamilyTools(self.doc).SFWallTypeNames]
         else:
-            self.storefrontWallIds = currentSelectedIds        
-        
-        
-        ###################################################################################################################
+            self.storefrontWallIds = currentSelectedIds
         
         
         if currentSelectedIds: 
             self.interiorWallIds = [self.doc.GetElement(id) for id in currentSelectedIds 
                                     if self.doc.GetElement(id).Name in SFF.FamilyTools(self.doc).SFWallTypeNames.keys()]
             
-        if str(self.currentView.ViewType) == "FloorPlan":
-            pass
 
         # walls collected by code -> returns wall object -> Autodesk.Revit.DB.Wall - defines <type 'Wall'>
         if not currentSelectedIds and self.currentViewOnly == True:
@@ -338,6 +589,24 @@ class Collect_Elements:
             self.nestedWallList.append(tempList)    
     # CLASS ENTRY POINT
     def Run_CollectWalls(self):
+        """
+        Ways to select SF walls:
+            A) select items directly from the model - doesn't have to be a plan view
+            B) collect items only in the current view if it is also a plan view
+            C) level selection. 
+        """     
+        
+        # A) walls collected by user selection -> returns wall id
+        currentSelectedIds = [i for i in self.uidoc.Selection.GetElementIds()]
+        if currentSelectedIds:
+            currentSelectedObjs = [self.doc.GetElement(i) for i in currentSelectedIds]
+            currentSelectedIdsLevelIds = []        
+        
+        
+        
+        
+        
+        
         # collect all walls and columns
         self.CollectSFWalls()
         self.CollectColumns()
@@ -535,264 +804,6 @@ class Create_NibWalls:
                     self.BigMethod(SFobj)
             else: continue            
         t.Commit()      
-
-###################################################
-## BASE CLASS C: COLLECT DOC ELEMENTS - ORIGINAL ##
-###################################################
-class CollectSFElements:
-    def __init__(self):
-        # pyRevit progress bar in console window
-        self.progressIndex = 0.0
-        
-        # derived parameters - CollectAllElementsInView()
-        self.storefrontFullIds = []
-        self.storefrontPartialIds = []
-        self.selectedLevels = []
-        self.storefrontFullLines = []
-        self.storefrontPartialLines = []
-        self.interiorWallsLines = []
-        self.interiorWallsLinesEdges = []
-        self.startingAssembyId = None
-        self.interiorWallIds = None
-        self.columnsLinesEdges = None
-        self.columnsLinesEdgesEC = None
-        self.selectedLevelId = None
-
-        self.docLoaded = SFU.RevitLoadECDocument(self.doc)
-        self.docEC = self.docLoaded[0]
-        self.ecTransform = self.docLoaded[1]            
-
-        self.allWallsEC = []
-        self.allLevelsEC = []
-        self.allColumnsEC = []
-        self.wallsLinesEdgesEC = []
-        self.selectedLevelsEC = []
-        self.selectedWallsEC = []
-        self.selectedColumnsEC = [] 
-
-        # derived parameters - Prep()
-        self.wallTypeCW = None
-        self.wallDoorHostDict = None
-        self.storefrontConfig = None # this is gui object and eventual user selections
-        self.systemName = None
-        self.mullionDict = None
-        self.doorDict = None
-        self.panelTypeDict = None
-        self.storefrontSpacingType = None
-        self.storefrontPaneWidth = None
-        self.systemPostWidth = None
-
-        # derived parameters - WrapAndChain()
-        self.storefrontElevations = []
-    def __repr__(self):
-        return("<class 'CollectSFElements'>")
-    # UTILITIES
-    def FilterSFWalls(self, sfWallObjs):
-        # this will filter user selection or collected SF walls
-        # into either a full or partial SF list to be used throughout
-        for i,data in enumerate(sfWallObjs):
-            # Autodesk.Revit.DB.ElementId
-            if type(data) is ElementId:
-                obj = self.doc.GetElement(data)
-            else: obj = data
-            if obj.Name in self.familyObj.SFWallTypeNames.keys() and self.familyObj.SFWallTypeNames[obj.Name] == 0:
-                self.storefrontFullIds.append(obj.Id)
-            elif obj.Name in self.familyObj.SFWallTypeNames.keys() and self.familyObj.SFWallTypeNames[obj.Name] == 1:
-                self.storefrontPartialIds.append(obj.Id)
-    # MAIN STUFF
-    def CollectAllElementsInView(self):
-        # collect plan view level and levelId
-        self.selectedLevelId = self.currentView.GenLevel.Id
-        self.selectedLevelObj = self.doc.GetElement(self.selectedLevelId)
-
-        allColumns = SFU.GetAllElements(self.doc, BuiltInCategory.OST_Columns, Autodesk.Revit.DB.FamilyInstance, currentView=True)
-        allColumns += SFU.GetAllElements(self.doc, BuiltInCategory.OST_StructuralColumns, Autodesk.Revit.DB.FamilyInstance, currentView=True)
-        
-        # collect all SF walls in view
-        self.interiorWallIds = [i.Id for i in FilteredElementCollector(self.doc, self.currentView.Id).OfClass(Wall) if i.Name in self.familyObj.SFWallTypeNames.keys()]
-        
-        currentSelectedIds = list(self.uidoc.Selection.GetElementIds())
-        if currentSelectedIds:
-            self.FilterSFWalls(currentSelectedIds)                   
-        else:
-            self.FilterSFWalls(FilteredElementCollector(self.doc, self.currentView.Id).OfClass(Wall))
-
-        # this might be used to track each assembly - possibly for fabrication?
-        # collect existing storefront curtain walls and check their Marks to ensure they incrememt. 
-        # so that mark numbers can be consecutive?
-        self.startingAssembyId = 0
-        storefrontWallsInView = rpw.db.Collector(of_class='Wall', view=self.currentView, where=lambda x: str(x.WallType.Kind) == "Curtain")
-
-
-        tempList = []
-        for storefrontInView in storefrontWallsInView:
-            mark = storefrontInView.get_Parameter(BuiltInParameter.ALL_MODEL_MARK).AsString()
-            if mark:
-                tempList.append(int(mark[mark.index("-")+1:]))
-        if tempList:
-            sortedList = sorted(tempList)
-            self.startingAssembyId = sortedList[-1]
-
-        # makes sure no stacked walls are included.    
-        tempList = []
-        for wallId in self.interiorWallIds:
-            wall = self.doc.GetElement(wallId)
-            if not wall.IsStackedWallMember:
-                tempList.append(wallId)
-        self.interiorWallIds = tempList
-
-        # Sort lists by level
-        self.storefrontFullIds = SFU.FilterElementsByLevel(self.doc, self.storefrontFullIds, self.selectedLevelId)
-        self.storefrontPartialIds = SFU.FilterElementsByLevel(self.doc, self.storefrontPartialIds, self.selectedLevelId)
-        self.interiorWallIds = SFU.FilterElementsByLevel(self.doc, self.interiorWallIds, self.selectedLevelId)
-        selectedColumns = SFU.FilterElementsByLevel(self.doc, allColumns, self.selectedLevelId)
-
-        # collect perimeter/collision geometry from EC model
-        if self.docEC:
-            levelElevationEC = None 
-            for p in self.selectedLevelObj.Parameters:
-                if p.Definition.Name == "Elevation":
-                    levelElevationEC = p.AsDouble()
-            self.selectedWallsEC = SFU.FilterElementsByLevel(self.docEC, self.allWallsEC, levelElevationEC)
-            self.selectedColumnsEC = SFU.FilterElementsByLevel(self.docEC, self.allColumnsEC, levelElevationEC)
-            self.wallsLinesEdgesEC = SFU.GetWallEdgeCurves(self.docEC, self.selectedWallsEC, self.ecTransform)
-            self.columnsLinesEdgesEC = SFU.GetColumnEdgeCurves(self.docEC, self.selectedColumnsEC, self.ecTransform)
-
-        # collect perimeter/collision geometry from Design model
-        self.interiorWallsLinesEdges = SFU.GetWallEdgeCurves(self.doc, self.interiorWallIds, None)
-        self.columnsLinesEdges = SFU.GetColumnEdgeCurves(self.doc, selectedColumns)
-
-        levelElevation = self.selectedLevelObj.Elevation
-    def Prep(self):
-        self.systemName = self.currentConfig["currentSystem"]
-
-        self.storefrontPaneWidth = self.currentConfig["storefrontPaneWidth"]
-        self.storefrontSpacingType = self.currentConfig["spacingType"]
-
-        self.mullionDict = SFU.GetMullionTypeDict(self.doc)
-        self.panelTypeDict = SFU.GetWindowTypeDict()
-        self.doorDict = self.currentConfig["systemDoors"]
-        wallTypeDict = SFU.GetWallTypeDict()
-        self.wallDoorHostDict = SFU.GetDoorDictByWallHost()
-
-        # Ensure walltypes are loaded
-        if not "I-Storefront-"+ self.systemName in wallTypeDict.keys():
-            Autodesk.Revit.UI.TaskDialog.Show ("ERROR", "Make sure you selected/loaded the correct partition system. Check your wall types.")
-            sys.exit()
-
-        # Profile widths
-        self.systemPostWidth = self.doc.GetElement(self.mullionDict["{0}_Post".format(self.systemName)]).get_Parameter(BuiltInParameter.CUST_MULLION_THICK).AsDouble()
-
-        systemDoorFrame = self.doc.GetElement(self.mullionDict["{0}_DoorFrame".format(self.systemName)])
-        systemDoorFrameWidth = systemDoorFrame.get_Parameter(BuiltInParameter.CUST_MULLION_WIDTH2).AsDouble()
-        systemDoorFrameWidth += systemDoorFrame.get_Parameter(BuiltInParameter.CUST_MULLION_WIDTH1).AsDouble()
-
-        systemOneBy = self.doc.GetElement(self.mullionDict["{0}_OneBy".format(self.systemName)])
-        systemOneByWidth = systemOneBy.get_Parameter(BuiltInParameter.CUST_MULLION_WIDTH2).AsDouble()
-        systemOneByWidth += systemOneBy.get_Parameter(BuiltInParameter.CUST_MULLION_WIDTH1).AsDouble()
-
-        self.wallTypeCW = wallTypeDict["I-Storefront-"+self.systemName]
-    #@DBG.Profiler(self.WrapAndChain) # check execution time
-    def WrapAndChain(self):
-        """
-        Takes walls that are inline and makes them a single
-        wall element so that you dont get segmented walls that
-        are supposed to be a single continuous elevation.
-        """
-        assemblyId = self.startingAssembyId
-        self.storefrontElevations = []
-        storefrontFullAndPartial = []
-
-        for wallId in self.storefrontFullIds:
-            storefrontFullAndPartial.append([wallId,"Full"])
-        for wallId in self.storefrontPartialIds:
-            storefrontFullAndPartial.append([wallId,"Partial"])
-
-        # Make SF Objects
-        for item1 in storefrontFullAndPartial:
-            wallId1 = item1[0]
-            wallStorefrontType1 = item1[1]
-
-            wall1 = self.doc.GetElement(wallId1)
-            wall1LocationCurve = wall1.Location.Curve
-
-            wallDoors = []
-            wallHostIds = [wallId1]
-
-            if wallId1 in self.wallDoorHostDict.keys():
-                wallDoors = self.wallDoorHostDict[wallId1]
-
-            ## PROFILE THIS SECTION ##########################################################################
-
-            # Chain Searching
-            # Find neighbors and chain them if they are in-line.
-            searchingForChain = True
-            while searchingForChain:
-                foundNeighbor = False
-                wall1Start = wall1LocationCurve.GetEndPoint(0)
-                wall1End = wall1LocationCurve.GetEndPoint(1)
-                wall1Endpoints = [wall1Start, wall1End]
-
-                for item2 in storefrontFullAndPartial:
-                    wallId2 = item2[0]
-                    wallStorefrontType2 = item2[1]
-
-                    if wallId1 != wallId2 and wallStorefrontType1 == wallStorefrontType2:
-                        wall2 = self.doc.GetElement(wallId2)
-                        wall2LocationCurve = wall2.Location.Curve
-                        wall2Start = wall2LocationCurve.GetEndPoint(0)
-                        wall2End = wall2LocationCurve.GetEndPoint(1)
-                        wall2Endpoints = [wall2Start, wall2End]
-                        for i in range(len(wall1Endpoints)):
-                            point1a = wall1Endpoints[i]
-                            point1b = wall1Endpoints[i-1]
-                            for j in range(len(wall2Endpoints)):
-                                point2a = wall2Endpoints[j]
-                                point2b = wall2Endpoints[j-1]
-                                dist = point1a.DistanceTo(point2a)
-                                if dist < self.tol:
-                                    angle = SFU.AngleThreePoints(point1b, point1a, point2b)
-                                    if abs(angle-180) < self.tol:
-                                        wallHostIds += [wallId2]
-                                        storefrontFullAndPartial.remove(item2)
-                                        if wallId2 in self.wallDoorHostDict.keys():
-                                            wallDoors += self.wallDoorHostDict[wallId2]
-                                        wall1LocationCurve = Line.CreateBound(point1b, point2b)
-                                        foundNeighbor = True
-                                        break
-                    if foundNeighbor:
-                        break
-                if not foundNeighbor:
-                    searchingForChain = False
-
-            ## PROFILE THIS SECTION ##########################################################################
-
-            # Create SF Object
-            assemblyId += 1
-
-            if wallStorefrontType1 == "Full":
-                sillH = self.currentConfig["fullSillHeight"]
-            elif wallStorefrontType1 == "Partial":
-                if self.currentConfig["hasLowerInfill"]:
-                    sillH = self.currentConfig["fullSillHeight"]
-                else:
-                    sillH = self.currentConfig["partialSillHeight"]
-
-            headH = self.currentConfig["headHeight"]
-            sfe = StorefrontElevation(wallHostIds, wall1LocationCurve, wallStorefrontType1, assemblyId, sillH, headH, self.systemName)
-            # Doors
-            if wallDoors:
-                sfe.Doors = wallDoors
-            self.storefrontElevations.append(sfe)
-    # MAIN CLASS ENTRY POINT
-    def Run_StorefrontPrep(self):
-        
-        # need to be able to collect any item, not
-        # just those in a view
-        
-        self.CollectAllElementsInView()
-        self.Prep()
-        self.WrapAndChain()
 
 ################################
 ## BASE CLASS D: RHINO ENGINE ##
@@ -1757,13 +1768,15 @@ class GenerateSF(Collect_PreGUI, Create_NibWalls,
         formObj = SFGUI.SF_Form(self.doc, 
                                 gypWallOptions=self.gypWallDict_KEYS,
                                 loadedFamilies=self.loadedFamilies)
-        formObj.SF_GetUserConfigs()
+        formObj.SF_GetuserSelection()
+        
+        
         
         # instantiate rpw form | what system will be created and what families are loaded
-        #formObj = SFGUI.SF_Dialogue(self.doc,
-                                     #levelNames=self.levelNames,
-                                     #gypWallNames=self.gypWallNames,
-                                     #loadedFamilies=self.loadedFamilies)
+        #formObj = SFGUI.Form1(self.doc,
+                                #levelNames=self.levelNames,
+                                #gypWallNames=self.gypWallNames,
+                                #loadedFamilies=self.loadedFamilies)
         #Application.Run(formObj)        
         
         
@@ -1775,14 +1788,20 @@ class GenerateSF(Collect_PreGUI, Create_NibWalls,
         self.currentConfig = formObj.currentConfig
         
         # run whole script - current currentConfig file fed back to family module
-        if formObj.userConfigs["createNibWallOnly"] == False:
+        if formObj.userSelection["createNibWallOnly"] == False:
+            
             # load families
             SFF.FamilyTools(self.doc).Run_LoadFamilies(self.currentConfig)
+            
+            # GET SELECTION TYPE
+            # you can either select from doc and extract levels | any view type, just extract levels from selection
+            # you can be in plan view either do all in view or selection in plan view, works like selection above
+            # select levels to do storefront on all walls on those respective levels
     
             # create nib walls
-            if formObj.userConfigs["createNibWall"]:
+            if formObj.userSelection["createNibWall"]:
                 if str(self.currentView.ViewType) == "FloorPlan":
-                    self.Run_CreateNibWalls() # shouldn't this be current config? saved userconfigs from form become currentConfig?
+                    self.Run_CreateNibWalls() # shouldn't this be current config? saved userSelection from form become currentConfig?
                 else:
                     Autodesk.Revit.UI.TaskDialog.Show ("ERROR", "Run the tool in floorplan view only!")
                     pyrevit.script.exit()                
@@ -1797,8 +1816,11 @@ class GenerateSF(Collect_PreGUI, Create_NibWalls,
             self.CheckErrors()
         
         # only run nib walls
-        elif formObj.userConfigs["createNibWallOnly"] == True:
+        elif formObj.userSelection["createNibWallOnly"] == True:
             if str(self.currentView.ViewType) == "FloorPlan":
+                
+                # GET SELECTION TYPE
+                
                 self.Run_CreateNibWalls()
             else:
                 Autodesk.Revit.UI.TaskDialog.Show ("ERROR", "Run the tool in floorplan view only!")

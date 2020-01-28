@@ -45,6 +45,16 @@ from Autodesk.Revit.DB import * # noqa E402
 # SF2 modules
 import SF2_Families_CleanUp as SFF # noqa E402
 
+
+"""
+
+THIS NEEDS TO OUTPUT SELECTION TYPE: 
+    0: USER SELECTION, 
+    1: SELECTION OF ELEMENTS, THROUGH LEVEL SELECTION DIALOUGE
+    2: ELEMENTS IN PLAN VIEW IF NO LEVEL SELECTION
+
+"""
+
 #####################
 ## STOREFRONT FORM ##
 #####################
@@ -103,7 +113,7 @@ class SF_Form:
         self.currentConfig = self.familyObj.currentConfig
         
         # outputs - used seperately from json files that are written, more flexible
-        self.userConfigs = None        
+        self.userSelection = None        
         
         # loads previously saved currentConfig!
         # if an error points to this location, comment this out, run again to save another json
@@ -192,10 +202,12 @@ class SF_Form:
                            ]
     
     def SetFormOutputs(self, form):
+        # this option means nothing was selected
         if not form.values:
             # better than sys.exit()
             pyrevit.script.exit()
         
+        # this option means form selections were successful
         else:
             self.selectedSystem = form.values["combobox1"]
             self.headHeight = float(form.values["combobox2"])
@@ -225,28 +237,28 @@ class SF_Form:
 
         todaysDate = "{0}-{1}-{2}".format(dt.Today.Month, dt.Today.Day, dt.Today.Year)        
         
-        self.userConfigs = {"projectName": projectName,
-                            "projectId": projectId.IntegerValue,
-                            "configDate": todaysDate,
-                            "families": self.GUI_loadedFamilies,
+        self.userSelection = {"projectName": projectName,
+                              "projectId": projectId.IntegerValue,
+                              "configDate": todaysDate,
+                              "families": self.GUI_loadedFamilies,
                        
-                            "selectedSystem": self.selectedSystem,
-                            "headHeight": self.headHeight,
-                            "partialHeadHeight": self.partialHeadHeight,
+                              "selectedSystem": self.selectedSystem,
+                              "headHeight": self.headHeight,
+                              "partialHeadHeight": self.partialHeadHeight,
                        
-                            "spacingType": self.spacingType,
-                            "storefrontPaneWidth": self.storefrontPaneWidth,
+                              "spacingType": self.spacingType,
+                              "storefrontPaneWidth": self.storefrontPaneWidth,
                             
-                            "createNibWall": self.createNibWall,
-                            "createNibWallOnly": self.createNibWallOnly,
-                            "nibWallType": self.nibWallType,
-                            "nibWallLength": self.nibWallLength
-                            }
+                              "createNibWall": self.createNibWall,
+                              "createNibWallOnly": self.createNibWallOnly,
+                              "nibWallType": self.nibWallType,
+                              "nibWallLength": self.nibWallLength
+                              }
         
-        # convert userConfigs to currentConfigs + all other currentConfig settings
-        self.familyObj.Run_SaveSFCurrentConfig(self.selectedSystem, self.userConfigs)
+        # convert userSelection to currentConfigs + all other currentConfig settings
+        self.familyObj.Run_SaveSFCurrentConfig(self.selectedSystem, self.userSelection)
     
-    def SF_GetUserConfigs(self):
+    def SF_GetuserSelection(self):
         from rpw.ui.forms import FlexForm
         # set form options
         self.SetDefaultFormValues()
