@@ -202,7 +202,7 @@ class CollectSFElements:
         # pyRevit progress bar in console window
         self.progressIndex = 0.0
         
-        # derived parameters - CollectAllElementsInView()
+        # derived parameters - CollectNeededElements()
         self.storefrontFullIds = []
         self.storefrontPartialIds = []
         self.selectedLevels = []
@@ -242,8 +242,10 @@ class CollectSFElements:
 
         # derived parameters - WrapAndChain()
         self.storefrontElevations = []
+    
     def __repr__(self):
         return("<class 'CollectSFElements'>")
+    
     # UTILITIES
     def FilterSFWalls(self, sfWallObjs):
         # this will filter user selection or collected SF walls
@@ -257,8 +259,37 @@ class CollectSFElements:
                 self.storefrontFullIds.append(obj.Id)
             elif obj.Name in self.familyObj.SFWallTypeNames.keys() and self.familyObj.SFWallTypeNames[obj.Name] == 1:
                 self.storefrontPartialIds.append(obj.Id)
+    
     # MAIN STUFF
-    def CollectAllElementsInView(self):
+    def CollectNeededElements(self):
+        ## save this
+        #if userSelectedIds: 
+            #self.interiorWallIds = [self.doc.GetElement(id) for id in userSelectedIds 
+                                    #if self.doc.GetElement(id).Name in SFF.FamilyTools(self.doc).SFWallTypeNames.keys()]        
+        
+        
+        
+        
+        if self.selectionType == "userSelection":
+            # this will get used in the selection class
+            currentSelectedObjs = [self.doc.GetElement(i) for i in self.userSelectedIds]
+            self.storefrontWallIds = self.userSelectedIds
+            
+            userSelectedIdsLevelIds = []
+        
+        elif self.selectionType == "planViewSelection":
+            # get storefront walls from view in document
+            self.storefrontWallIds = [i.Id for i in FilteredElementCollector(self.doc, self.currentView.Id).OfClass(Wall)
+                                      if i.Name in SFF.FamilyTools(self.doc).SFWallTypeNames]
+            
+        elif self.selectionType == "levelSelection":
+            pass        
+        
+        # once the appropriate walls are placed in the correct locations the script can run as before. last hurdle is the point where full and partial sfs are parsed.
+        
+        
+        
+        
         # collect plan view level and levelId
         self.selectedLevelId = self.currentView.GenLevel.Id
         self.selectedLevelObj = self.doc.GetElement(self.selectedLevelId)
@@ -269,9 +300,9 @@ class CollectSFElements:
         # collect all SF walls in view
         self.interiorWallIds = [i.Id for i in FilteredElementCollector(self.doc, self.currentView.Id).OfClass(Wall) if i.Name in self.familyObj.SFWallTypeNames.keys()]
         
-        currentSelectedIds = list(self.uidoc.Selection.GetElementIds())
-        if currentSelectedIds:
-            self.FilterSFWalls(currentSelectedIds)                   
+        userSelectedIds = list(self.uidoc.Selection.GetElementIds())
+        if userSelectedIds:
+            self.FilterSFWalls(userSelectedIds)                   
         else:
             self.FilterSFWalls(FilteredElementCollector(self.doc, self.currentView.Id).OfClass(Wall))
 
@@ -321,6 +352,7 @@ class CollectSFElements:
         self.columnsLinesEdges = SFU.GetColumnEdgeCurves(self.doc, selectedColumns)
 
         levelElevation = self.selectedLevelObj.Elevation
+    
     def Prep(self):
         self.systemName = self.currentConfig["currentSystem"]
 
@@ -438,17 +470,15 @@ class CollectSFElements:
 
             headH = self.currentConfig["headHeight"]
             sfe = StorefrontElevation(wallHostIds, wall1LocationCurve, wallStorefrontType1, assemblyId, sillH, headH, self.systemName)
+            
             # Doors
             if wallDoors:
                 sfe.Doors = wallDoors
             self.storefrontElevations.append(sfe)
+    
     # MAIN CLASS ENTRY POINT
     def Run_StorefrontPrep(self):
-        
-        # need to be able to collect any item, not
-        # just those in a view
-        
-        self.CollectAllElementsInView()
+        self.CollectNeededElements()
         self.Prep()
         self.WrapAndChain()
         
@@ -468,10 +498,12 @@ class Collect_Elements:
         # wall outputs
         self.allWallIds = None
         
+        self.userSelectedIds = None # this was used to test selection type but needed later on...
+        
         # pyRevit progress bar in console window
         self.progressIndex = 0.0
     
-        # derived parameters - CollectAllElementsInView()
+        # derived parameters - CollectNeededElements()
         self.storefrontFullIds = []
         self.storefrontPartialIds = []
         self.selectedLevels = []
@@ -507,36 +539,60 @@ class Collect_Elements:
         # filter self.allWallIds to contain only those in current plan view
         self.allWallIds = [i for i in SFU.FilterElementsByLevel(self.doc, self.allWallIds, self.currentLevel.Id)]        
     def CollectSFWalls(self):
+        if self.selectionType == "userSelection":
+            # this will get used in the selection class
+            currentSelectedObjs = [self.doc.GetElement(i) for i in self.userSelectedIds]
+            self.storefrontWallIds = self.userSelectedIds
+            
+            userSelectedIdsLevelIds = []
+        
+        elif self.selectionType == "planViewSelection":
+            # get storefront walls from view in document
+            self.storefrontWallIds = [i.Id for i in FilteredElementCollector(self.doc, self.currentView.Id).OfClass(Wall)
+                                      if i.Name in SFF.FamilyTools(self.doc).SFWallTypeNames]
+            
+        elif self.selectionType == "levelSelection":
+            pass        
+        
+        
+        
+        
+        
+        
+        
+        self.interiorWallIds = [self.doc.GetElement(id) for id in self.userSelectedIds 
+                                if self.doc.GetElement(id).Name in SFF.FamilyTools(self.doc).SFWallTypeNames.keys()]        
+        
+        
         # A) walls collected by user selection -> returns wall id
-        currentSelectedIds = [i for i in self.uidoc.Selection.GetElementIds()] # GetElementIds is a .net enumerator
-        if currentSelectedIds:
-            currentSelectedObjs = [self.doc.GetElement(i) for i in currentSelectedIds]
-            currentSelectedIdsLevelIds = []
+        userSelectedIds = [i for i in self.uidoc.Selection.GetElementIds()] # GetElementIds is a .net enumerator
+        if userSelectedIds:
+            currentSelectedObjs = [self.doc.GetElement(i) for i in userSelectedIds]
+            userSelectedIdsLevelIds = []
         
-        # B) if not level selected from GUI and str(self.currentView.ViewType) == "FloorPlan":
         
-        if not currentSelectedIds:
+        if not userSelectedIds:
             # get storefront walls from view in document
             self.storefrontWallIds = [i.Id for i in FilteredElementCollector(self.doc, self.currentView.Id).OfClass(Wall)
                                       if i.Name in SFF.FamilyTools(self.doc).SFWallTypeNames]
         else:
-            self.storefrontWallIds = currentSelectedIds
+            self.storefrontWallIds = userSelectedIds
         
         
-        if currentSelectedIds: 
-            self.interiorWallIds = [self.doc.GetElement(id) for id in currentSelectedIds 
+        if userSelectedIds: 
+            self.interiorWallIds = [self.doc.GetElement(id) for id in userSelectedIds 
                                     if self.doc.GetElement(id).Name in SFF.FamilyTools(self.doc).SFWallTypeNames.keys()]
             
 
         # walls collected by code -> returns wall object -> Autodesk.Revit.DB.Wall - defines <type 'Wall'>
-        if not currentSelectedIds and self.currentViewOnly == True:
+        if not userSelectedIds and self.currentViewOnly == True:
             # level of current view
             self.selectedLevelId = self.currentView.GenLevel.Id
             self.selectedLevelObj = self.doc.GetElement(self.selectedLevelId)            
             
             self.interiorWallIds = [i for i in FilteredElementCollector(self.doc, self.currentView.Id).OfClass(Wall)
                                     if i.Name in SFF.FamilyTools(self.doc).SFWallTypeNames.keys()]
-        elif not currentSelectedIds and self.currentViewOnly == False:
+        elif not userSelectedIds and self.currentViewOnly == False:
             self.interiorWallIds = [i for i in FilteredElementCollector(self.doc).OfClass(Wall)
                                     if i.Name in SFF.FamilyTools(self.doc).SFWallTypeNames.keys()]
 
@@ -589,24 +645,6 @@ class Collect_Elements:
             self.nestedWallList.append(tempList)    
     # CLASS ENTRY POINT
     def Run_CollectWalls(self):
-        """
-        Ways to select SF walls:
-            A) select items directly from the model - doesn't have to be a plan view
-            B) collect items only in the current view if it is also a plan view
-            C) level selection. 
-        """     
-        
-        # A) walls collected by user selection -> returns wall id
-        currentSelectedIds = [i for i in self.uidoc.Selection.GetElementIds()]
-        if currentSelectedIds:
-            currentSelectedObjs = [self.doc.GetElement(i) for i in currentSelectedIds]
-            currentSelectedIdsLevelIds = []        
-        
-        
-        
-        
-        
-        
         # collect all walls and columns
         self.CollectSFWalls()
         self.CollectColumns()
@@ -653,7 +691,7 @@ class Create_NibWalls:
         self.topConstraint = None
         self.unconnectedHeight = None
         self.topOffset = None
-        self.botConstraint = self.currentLevel.Id        
+        self.botConstraint = None       
         
         self.storefrontWallIds = None
         self.intersectionPoints = None
@@ -745,6 +783,9 @@ class Create_NibWalls:
                     print("Wall {0} was too short to add a nib wall".format(id))                                    
     
             if nibWalls:
+                # this will have to be adjusted bc not view dependent
+                self.botConstraint = self.currentLevel.Id
+                
                 for nibWall in nibWalls:
                     # it seems like you create walls of whatever type then change type
                     # but you inherit parameter settings of host wall???
@@ -1747,19 +1788,39 @@ class GenerateSF(Collect_PreGUI, Create_NibWalls,
         self.user = str(System.Environment.UserName)
         self.tol = 0.001
         self.mrTimer = SFU.Timer() # not used so far
+        self.selectionType = None
         
         # helper family methods
-        self.familyObj = SFF.FamilyTools(self.doc) # instantiates family modules to SFobjCrv_StartPt extracting data from it in this script - nothing created yet  
+        # instantiates family modules to SFobjCrv_StartPt 
+        # extracting data from it in this script - nothing created yet
+        self.familyObj = SFF.FamilyTools(self.doc)   
 
         # class inheritance / polymorphism
         Collect_PreGUI.__init__(self)
         Create_NibWalls.__init__(self)
         CollectSFElements.__init__(self)
         ParseSFWalls_Rhino.__init__(self)
-        BuildSFSystem.__init__(self) # DERIVED CLASS WITH ITS OWN INHERITANCES
+        
+        # [...] derived class w/ its own inheritances
+        BuildSFSystem.__init__(self)
+        
         PostSFErrorCheck.__init__(self)
+    
     def __repr__(self):
         return("<class 'GenerateSF'>")
+    
+    def TaskDialogue(self):
+        mainDialog = TaskDialog("Storefront 2")
+        mainDialog.MainInstruction = "WHOA! HANLON YOU MESSED UP"
+        mainDialog.MainContent = "Make sure you either select a SF wall, run this tool in a plan view, or select at least one level from the list"
+
+        # Set common buttons and default button. If no CommonButton or CommandLink is added,
+        # task dialog will show a Close button by default
+        mainDialog.CommonButtons = TaskDialogCommonButtons.Close
+        mainDialog.DefaultButton = TaskDialogResult.Close
+
+        mainDialog.Show()        
+    
     def Run_GenerateSF(self):
         # instantiate variables that need to be fed to GUI
         self.Run_PreGUIMethods()
@@ -1769,34 +1830,37 @@ class GenerateSF(Collect_PreGUI, Create_NibWalls,
                                 gypWallOptions=self.gypWallDict_KEYS,
                                 loadedFamilies=self.loadedFamilies)
         formObj.SF_GetuserSelection()
-        
-        
-        
-        # instantiate rpw form | what system will be created and what families are loaded
-        #formObj = SFGUI.Form1(self.doc,
-                                #levelNames=self.levelNames,
-                                #gypWallNames=self.gypWallNames,
-                                #loadedFamilies=self.loadedFamilies)
-        #Application.Run(formObj)        
-        
-        
-        """
-        how configs get used: currentConfigs are written by selections made by user configs
-        
-        current configs are saved as json and referenced at SFobjCrv_StartPt of project
-        """
+        #Application.Run(formObj) 
+   
+        # how configs get used: currentConfigs are written by selections made by user configs
+        # current configs are saved as json and referenced at SFobjCrv_StartPt of project
+        # this is a separate json file that is read 
         self.currentConfig = formObj.currentConfig
         
+        # test for/collect user selection
+        self.userSelectedIds = [i for i in self.uidoc.Selection.GetElementIds()
+                                if i.Name in SFF.FamilyTools(self.doc).SFWallTypeNames.keys()]        
+        
+        
+        # A) USER MADE A SELECTION - ESTABLISH SELECTION TYPE
+        if self.userSelectedIds and not formObj.userSelection["selectedLevels"]:
+            self.selectionType = "userSelection"     
+        # B) NO USER SELECTION OR LEVEL SELECTION BUT USER IN PLAN VIEW
+        elif not self.userSelectedIds and not formObj.userSelection["selectedLevels"] and str(self.currentView.ViewType) == "FloorPlan":
+            self.selectionType = "planViewSelection"
+        # C) USER SELECTED LEVELS FROM GUI OPTION LIST
+        elif formObj.userSelection["selectedLevels"]:
+            self.selectionType = "levelSelection"
+        # D) NO APPROPRIATE SELECTION MADE
+        else:
+            self.TaskDialogue()
+         
+         
         # run whole script - current currentConfig file fed back to family module
         if formObj.userSelection["createNibWallOnly"] == False:
             
             # load families
             SFF.FamilyTools(self.doc).Run_LoadFamilies(self.currentConfig)
-            
-            # GET SELECTION TYPE
-            # you can either select from doc and extract levels | any view type, just extract levels from selection
-            # you can be in plan view either do all in view or selection in plan view, works like selection above
-            # select levels to do storefront on all walls on those respective levels
     
             # create nib walls
             if formObj.userSelection["createNibWall"]:
@@ -1824,5 +1888,5 @@ class GenerateSF(Collect_PreGUI, Create_NibWalls,
                 self.Run_CreateNibWalls()
             else:
                 Autodesk.Revit.UI.TaskDialog.Show ("ERROR", "Run the tool in floorplan view only!")
-                pyrevit.script.exit()                 
-            
+                pyrevit.script.exit()
+                """
